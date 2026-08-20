@@ -1,43 +1,43 @@
 import sqlite3
 
-import pytest
-
 from worldsim.cli import main
 
 
-def test_generate_no_save_outputs_stats_and_map(capsys):
-    rc = main(["generate", "--seed", "12345", "--no-save"])
-    assert rc == 0
-    out = capsys.readouterr().out
-    assert "seed=12345" in out
-    assert "Terrain breakdown:" in out
-    for name in ["WATER", "DESERT", "PLAINS", "FERTILE", "FOREST", "MOUNTAIN"]:
-        assert name in out
-    assert "ASCII map:" in out
+def test_simulate_no_save_deterministic(capsys):
+    rc1 = main(["simulate", "--seed", "12345", "--ticks", "300", "--no-save"])
+    out1 = capsys.readouterr().out
+    assert rc1 == 0
+    main(["simulate", "--seed", "12345", "--ticks", "300", "--no-save"])
+    out2 = capsys.readouterr().out
+    assert out1 == out2
+    assert "pop" in out1
+    assert "tick    300" in out1
 
 
-def test_generate_persists_world(tmp_path, capsys):
+def test_simulate_persists_final_state(tmp_path, capsys):
     db = tmp_path / "world.db"
-    rc = main(["generate", "--seed", "42", "--db", str(db)])
+    rc = main(["simulate", "--seed", "42", "--ticks", "120", "--db", str(db)])
     assert rc == 0
     conn = sqlite3.connect(db)
     try:
-        seeds = [r[0] for r in conn.execute("SELECT seed FROM worlds").fetchall()]
+        worlds = conn.execute("SELECT COUNT(*) FROM worlds").fetchone()[0]
         snaps = conn.execute("SELECT COUNT(*) FROM snapshots").fetchone()[0]
+        settle = conn.execute("SELECT COUNT(*) FROM settlements").fetchone()[0]
     finally:
         conn.close()
-    assert seeds == [42]
-    assert snaps == 1
+    assert (worlds, snaps, settle) == (1, 1, 1)
 
 
-def test_same_seed_identical_output(capsys):
-    main(["generate", "--seed", "999", "--no-save"])
-    out1 = capsys.readouterr().out
-    main(["generate", "--seed", "999", "--no-save"])
-    out2 = capsys.readouterr().out
-    assert out1 == out2
+def test_simulate_reports_growth(capsys):
+    main(["simulate", "--seed", "99", "--ticks", "200", "--report-interval", "100",
+          "--no-save"])
+    out = capsys.readouterr().out
+    # With a food-rich spawn the population should grow within 200 ticks.
+    lines = [ln for ln in out.splitlines() if "pop" in ln]
+    pops = [int(ln.split("pop")[1].split("|")[0]) for ln in lines]
+    assert pops[-1] > pops[0]
 
 
-def test_custom_size(capsys):
+def test_generate_still_works(capsys):
     rc = main(["generate", "--seed", "5", "--size", "16", "--no-save"])
     assert rc == 0

@@ -28,11 +28,13 @@ class TerrainProfile:
 
 
 # Per-tile base yields and movement costs (architecture_detailed.md §3.1).
+# Food values scaled so a good 3x3 spawn sustains initial population growth
+# (see notes.md Session 2): fertile ++ -> 4, plains + -> 2, forest + -> 1.
 TERRAIN_PROFILES: dict[TerrainType, TerrainProfile] = {
     TerrainType.WATER: TerrainProfile(movement_cost=5.0, food=0, wood=0, stone=0, metal=0),
     TerrainType.DESERT: TerrainProfile(movement_cost=1.5, food=-1, wood=0, stone=0, metal=0),
-    TerrainType.PLAINS: TerrainProfile(movement_cost=1.0, food=1, wood=0, stone=0, metal=0),
-    TerrainType.FERTILE: TerrainProfile(movement_cost=1.0, food=2, wood=0, stone=0, metal=0),
+    TerrainType.PLAINS: TerrainProfile(movement_cost=1.0, food=2, wood=0, stone=0, metal=0),
+    TerrainType.FERTILE: TerrainProfile(movement_cost=1.0, food=4, wood=0, stone=0, metal=0),
     TerrainType.FOREST: TerrainProfile(movement_cost=1.2, food=1, wood=3, stone=0, metal=0),
     TerrainType.MOUNTAIN: TerrainProfile(movement_cost=2.0, food=0, wood=0, stone=2, metal=1),
 }
