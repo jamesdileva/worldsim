@@ -7,6 +7,7 @@ from dataclasses import dataclass, field
 import numpy as np
 
 from . import terrain
+from .buildings import Improvement, ROAD_MOVEMENT_MULTIPLIER
 from .tiles import ASCII_GLYPHS, TERRAIN_PROFILES, TerrainType
 
 DEFAULT_SIZE = 256
@@ -23,6 +24,8 @@ class World:
     terrain: np.ndarray = field(init=False)
     # Tile ownership: settlement index, or UNOWNED (-1).
     ownership: np.ndarray = field(init=False)
+    # Tile improvements (roads, buildings): Improvement enum values.
+    improvements: np.ndarray = field(init=False)
 
     def __post_init__(self) -> None:
         self.elevation = terrain._noise_grid(
@@ -33,6 +36,9 @@ class World:
         )
         self.terrain = terrain.classify(self.elevation, self.moisture)
         self.ownership = np.full((self.size, self.size), UNOWNED, dtype=np.int32)
+        self.improvements = np.full(
+            (self.size, self.size), Improvement.NONE.value, dtype=np.int8
+        )
 
     @property
     def movement_cost(self) -> np.ndarray:
@@ -40,7 +46,11 @@ class World:
             [TERRAIN_PROFILES[TerrainType(t)].movement_cost for t in range(len(TerrainType))],
             dtype=np.float64,
         )
-        return costs[self.terrain]
+        result = costs[self.terrain]
+        result[self.improvements == Improvement.ROAD.value] *= (
+            ROAD_MOVEMENT_MULTIPLIER
+        )
+        return result
 
     def resource_yield(self) -> dict[str, int]:
         """Aggregate base resource yields across the whole world."""

@@ -76,6 +76,7 @@ def _encode_settlement(s: Settlement) -> dict:
         "growth_progress": s.growth_progress,
         "starvation_progress": s.starvation_progress,
         "net_food_rate": s.net_food_rate,
+        "build_queue": list(s.build_queue),
     }
 
 
@@ -93,6 +94,7 @@ def _decode_settlement(obj: dict) -> Settlement:
         growth_progress=obj["growth_progress"],
         starvation_progress=obj["starvation_progress"],
         net_food_rate=obj["net_food_rate"],
+        build_queue=list(obj.get("build_queue", [])),
     )
 
 
@@ -105,6 +107,7 @@ def serialize_world(world: World, settlements: list[Settlement] | None = None) -
         "moisture": _encode_array(world.moisture),
         "terrain": _encode_array(world.terrain),
         "ownership": _encode_array(world.ownership),
+        "improvements": _encode_array(world.improvements),
         "settlements": [_encode_settlement(s) for s in (settlements or [])],
     }
     return json.dumps(state, sort_keys=True)
@@ -121,6 +124,8 @@ def deserialize_world(
     world.terrain = _decode_array(state["terrain"])
     if "ownership" in state:
         world.ownership = _decode_array(state["ownership"])
+    if "improvements" in state:
+        world.improvements = _decode_array(state["improvements"])
     settlements = [
         _decode_settlement(obj) for obj in state.get("settlements", [])
     ]

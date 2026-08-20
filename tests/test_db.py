@@ -66,6 +66,7 @@ def test_snapshot_state_is_compressed_json(tmp_path):
             "moisture",
             "terrain",
             "ownership",
+            "improvements",
             "settlements",
         }
     finally:

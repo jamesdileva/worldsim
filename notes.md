@@ -5,6 +5,96 @@ Decisions worth remembering are marked **[DECISION]**.
 
 ---
 
+## Session 3 — 2026-08-20 — Sprint 3: Buildings, Roads & Infrastructure
+
+**Scope:** Phase 1 / Sprint 3 — Farm/Sawmill/Mine/Granary with costs and
+per-tick outputs, roads at 50% movement cost, connectivity flagging,
+construction/destruction, persistence.
+
+### What was built
+
+- `buildings.py` — `BuildingType`/`Improvement` enums, `BuildingSpec` table
+  (costs, outputs, valid terrain), road cost/multiplier, base food capacity
+- `world.py` — `improvements` int8 grid (single source of truth for buildings
+  AND roads); `movement_cost` now halves on road tiles
+- `simulation.py` — `build_at()` (validates ownership/terrain/unimproved/
+  affordability), `build_road()`, `destroy_building()`, FIFO build queue
+  processed per tick, `road_connectivity()` BFS with settlement center as hub,
+  building outputs + passive gathering in `_produce_resources()`,
+  `food_capacity()` via granaries, auto-build rule (least-built-first),
+  auto-road rule (extends network one tile per interval)
+- `settlement.py` — starting reserves (30 wood / 15 stone), `build_queue`
+  field, `consume_food(income, capacity)` with overflow-wasted semantics
+- `db.py` — snapshots now include improvements array + build queues
+- Tests: 60 passing (19 new buildings tests; 5 terrain-gated skips)
+
+### Decisions
+
+- **[DECISION] Improvements grid is the single source of truth** for buildings
+  and roads (like the ownership grid). No duplicate building lists to drift;
+  per-settlement counts derived by masking with ownership.
+- **[DECISION] Farm allowed on Plains AND Fertile** (spec acceptance only
+  requires Plains; fertile is farmland). Sawmill → Forest only, Mine →
+  Mountain only, Granary → any owned land tile.
+- **[DECISION] Unspecified costs/outputs defined:** Sawmill 4w2s → +2 wood/tick;
+  Mine 6w4s → +2 stone +1 metal/tick; Granary 5w5s → +500 food cap;
+  Road 1 stone/tile. Farm kept exactly per spec: 5w3s → +2 food/tick.
+- **[DECISION] Food storage cap introduced:** base 500 + 500/granary. Income
+  above free storage is wasted. Fixes Session 2's unbounded-stock issue.
+  Crucially, `net_food_rate` records *uncapped* production so expansion
+  decisions don't stall when stock is full (this exact bug was found and fixed).
+- **[DECISION] Passive gathering trickle:** workers gather 25% of terrain
+  wood/stone/metal yields on owned tiles per tick. Without it the economy
+  hard-deadlocks: every building costs wood and sawmills need wood to build.
+- **[DECISION] Instant construction** when the queue head is affordable; queue
+  structure is future-ready for agents (Sprint 7) without multi-tick
+  construction complexity.
+- **[DECISION] Auto-build rule = least-built-type-first** (ties broken by
+  priority order farm>sawmill>mine>granary). First attempt ("always farm")
+  produced a 100%-farm mix; least-built balances the demo economy until real
+  agents arrive.
+- **[DECISION] Settlement center is a road-network hub**: roads adjacent to
+  spawn count as connected even though the center tile itself has no road.
+- **[DECISION] Persistence via snapshot JSON only** (improvements array +
+  build queues). No new tables — §24.1 schema doesn't call for them yet.
+
+### Gotchas / bugs found & fixed
+
+- Storage cap clamped income to 0 near cap → `net_food_rate` ≤ 0 → territory
+  claiming stalled permanently. Fix: cap applies to stock only; decision
+  signal uses uncapped production rate.
+- Wood deadlock: no passive wood income meant construction stopped forever
+  once starting reserves ran out (observed live: buildings frozen at 4).
+- Seed 42's spawn territory contains zero Plains tiles (all Fertile) — tests
+  that assume specific terrain near spawn must tolerate equivalents or skip.
+
+### Known issues / deferred
+
+- Auto rules are placeholders; agents replace them in Sprints 7–8.
+- Road network grows greedily adjacent-to-existing; no pathfinding toward
+  targets yet (meaningful route selection is §9.2, later sprint).
+- 5 tests skip when seed-42 territory lacks forest/mountain — could use a
+  guaranteed-feature seed instead.
+- Per-tick cost still O(territory); unchanged from Session 2 note.
+
+### Acceptance criteria status
+
+- ✅ Farm (5 wood, 3 stone) builds on Plains; produces +2 food/tick
+- ✅ Buildings destroyed when tile lost (release_territory clears improvements)
+- ✅ Roads on owned tiles; movement cost 50% of terrain normal
+- ✅ Road connectivity checked; disconnected roads flagged (BFS from hub)
+- ✅ Build queue exists and processes FIFO (UI inspector deferred — no UI yet)
+
+### Next up (Sprint 4)
+
+Economy, resource production & trade: inter-settlement trade routes over road
+networks, trade value from efficiency/distance, scarcity slowdowns, economic
+collapse (inventory < 0 for 48 ticks → population loss), `resources` +
+`trade_routes` tables. Requires multiple settlements — may pull multi-spawn
+forward from Sprint 9.
+
+---
+
 ## Session 2 — 2026-08-20 — Sprint 2: Settlements & Population Dynamics
 
 **Scope:** Phase 1 / Sprint 2 — Settlement entity, food income/consumption,
