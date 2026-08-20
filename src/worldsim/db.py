@@ -18,6 +18,7 @@ from pathlib import Path
 import numpy as np
 
 from .settlement import Settlement
+from .simulation import TradeRoute
 from .world import UNOWNED, World
 
 DEFAULT_DB_PATH = Path("data/world_sim/world.db")
@@ -45,6 +46,27 @@ CREATE TABLE IF NOT EXISTS settlements (
     spawn_y INTEGER NOT NULL,
     created_at_tick INTEGER NOT NULL,
     destroyed_at_tick INTEGER
+);
+
+-- Per-settlement resource inventory snapshots (Sprint 4).
+CREATE TABLE IF NOT EXISTS resources (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    settlement_id TEXT NOT NULL,
+    tick INTEGER NOT NULL,
+    food REAL NOT NULL DEFAULT 0,
+    wood REAL NOT NULL DEFAULT 0,
+    stone REAL NOT NULL DEFAULT 0,
+    metal REAL NOT NULL DEFAULT 0
+);
+
+-- Trade route registry (Sprint 4).
+CREATE TABLE IF NOT EXISTS trade_routes (
+    id TEXT PRIMARY KEY,
+    source_id TEXT NOT NULL,
+    dest_id TEXT NOT NULL,
+    established_tick INTEGER NOT NULL,
+    transfers INTEGER NOT NULL DEFAULT 0,
+    active INTEGER NOT NULL DEFAULT 1
 );
 """
 
@@ -98,7 +120,33 @@ def _decode_settlement(obj: dict) -> Settlement:
     )
 
 
-def serialize_world(world: World, settlements: list[Settlement] | None = None) -> str:
+def _encode_route(r: TradeRoute) -> dict:
+    return {
+        "id": r.id,
+        "source_id": r.source_id,
+        "dest_id": r.dest_id,
+        "established_tick": r.established_tick,
+        "transfers": r.transfers,
+        "active": r.active,
+    }
+
+
+def _decode_route(obj: dict) -> TradeRoute:
+    return TradeRoute(
+        source_id=obj["source_id"],
+        dest_id=obj["dest_id"],
+        established_tick=obj["established_tick"],
+        transfers=obj["transfers"],
+        active=obj["active"],
+        id=obj["id"],
+    )
+
+
+def serialize_world(
+    world: World,
+    settlements: list[Settlement] | None = None,
+    trade_routes: list[TradeRoute] | None = None,
+) -> str:
     state = {
         "seed": world.seed,
         "size": world.size,
@@ -109,13 +157,14 @@ def serialize_world(world: World, settlements: list[Settlement] | None = None) -
         "ownership": _encode_array(world.ownership),
         "improvements": _encode_array(world.improvements),
         "settlements": [_encode_settlement(s) for s in (settlements or [])],
+        "trade_routes": [_encode_route(r) for r in (trade_routes or [])],
     }
     return json.dumps(state, sort_keys=True)
 
 
 def deserialize_world(
     state_json: str,
-) -> tuple[World, list[Settlement]]:
+) -> tuple[World, list[Settlement], list[TradeRoute]]:
     state = json.loads(state_json)
     world = World(seed=state["seed"], size=state["size"])
     world.tick = state["tick"]
@@ -129,7 +178,10 @@ def deserialize_world(
     settlements = [
         _decode_settlement(obj) for obj in state.get("settlements", [])
     ]
-    return world, settlements
+    trade_routes = [
+        _decode_route(obj) for obj in state.get("trade_routes", [])
+    ]
+    return world, settlements, trade_routes
 
 
 @dataclass
@@ -154,8 +206,10 @@ class WorldStore:
         world: World,
         settlements: list[Settlement] | None = None,
         snapshot_tick: int | None = None,
+        trade_routes: list[TradeRoute] | None = None,
     ) -> str:
-        """Insert a world row, write a snapshot, and upsert settlement rows."""
+        """Insert a world row, write a snapshot, and upsert settlement,
+        resource, and trade-route rows."""
         world_id = str(uuid.uuid4())
         created_at = datetime.now(timezone.utc).isoformat()
         tick = snapshot_tick if snapshot_tick is not None else world.tick
@@ -166,7 +220,7 @@ class WorldStore:
             )
             self._conn.execute(
                 "INSERT INTO snapshots (tick, world_id, state_json) VALUES (?, ?, ?)",
-                (tick, world_id, serialize_world(world, settlements)),
+                (tick, world_id, serialize_world(world, settlements, trade_routes)),
             )
             for s in settlements or []:
                 self._conn.execute(
@@ -183,9 +237,39 @@ class WorldStore:
                         s.destroyed_at_tick,
                     ),
                 )
+                inv = s.resource_inventory
+                self._conn.execute(
+                    "INSERT INTO resources "
+                    "(settlement_id, tick, food, wood, stone, metal) "
+                    "VALUES (?, ?, ?, ?, ?, ?)",
+                    (
+                        s.id,
+                        tick,
+                        s.food_stock,
+                        inv.get("wood", 0.0),
+                        inv.get("stone", 0.0),
+                        inv.get("metal", 0.0),
+                    ),
+                )
+            for r in trade_routes or []:
+                self._conn.execute(
+                    "INSERT OR REPLACE INTO trade_routes "
+                    "(id, source_id, dest_id, established_tick, transfers, active) "
+                    "VALUES (?, ?, ?, ?, ?, ?)",
+                    (
+                        r.id,
+                        r.source_id,
+                        r.dest_id,
+                        r.established_tick,
+                        r.transfers,
+                        int(r.active),
+                    ),
+                )
         return world_id
 
-    def load_latest_snapshot(self, world_id: str) -> tuple[World, list[Settlement]]:
+    def load_latest_snapshot(
+        self, world_id: str
+    ) -> tuple[World, list[Settlement], list[TradeRoute]]:
         row = self._conn.execute(
             "SELECT state_json FROM snapshots WHERE world_id = ? "
             "ORDER BY tick DESC LIMIT 1",

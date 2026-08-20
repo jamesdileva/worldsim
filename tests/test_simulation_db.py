@@ -11,7 +11,9 @@ def test_settlement_round_trip_exact():
     for _ in range(50):
         sim.step()
 
-    world2, settlements = deserialize_world(serialize_world(sim.world, sim.settlements))
+    world2, settlements, routes = deserialize_world(
+        serialize_world(sim.world, sim.settlements)
+    )
     assert len(settlements) == 1
     r = settlements[0]
     assert (r.id, r.name) == (s.id, s.name)
@@ -25,6 +27,7 @@ def test_settlement_round_trip_exact():
 
     np.testing.assert_array_equal(world2.ownership, sim.world.ownership)
     assert world2.tick == sim.world.tick
+    assert routes == []
 
 
 def test_store_persists_settlement_rows(tmp_path):
@@ -37,7 +40,7 @@ def test_store_persists_settlement_rows(tmp_path):
             sim.step()
         world_id = store.save_world(sim.world, sim.settlements)
 
-        loaded_world, loaded_settlements = store.load_latest_snapshot(world_id)
+        loaded_world, loaded_settlements, _ = store.load_latest_snapshot(world_id)
         rows = store._conn.execute(
             "SELECT id, name, world_id, spawn_x, spawn_y, created_at_tick "
             "FROM settlements WHERE world_id = ?",
@@ -100,7 +103,7 @@ def test_sqlite_connection_usable_after_load(tmp_path):
         sim = Simulation(World(seed=1))
         s = sim.spawn_settlement()
         world_id = store.save_world(sim.world, [s])
-        _, loaded = store.load_latest_snapshot(world_id)
+        _, loaded, _ = store.load_latest_snapshot(world_id)
         assert loaded[0].id == s.id
     finally:
         store.close()

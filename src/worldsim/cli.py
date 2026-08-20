@@ -6,7 +6,7 @@ import argparse
 import sys
 
 from .db import DEFAULT_DB_PATH, WorldStore
-from .simulation import Simulation
+from .simulation import DEFAULT_SETTLEMENT_COUNT, Simulation
 from .tiles import TerrainType
 from .world import DEFAULT_SIZE, World
 
@@ -37,6 +37,12 @@ def _add_simulate_args(sub) -> None:
     sim = sub.add_parser("simulate", help="Run a headless simulation")
     sim.add_argument("--seed", type=int, required=True, help="World seed")
     sim.add_argument("--ticks", type=int, default=1000, help="Ticks to run")
+    sim.add_argument(
+        "--settlements",
+        type=int,
+        default=DEFAULT_SETTLEMENT_COUNT,
+        help="Number of settlements to spawn (default 3)",
+    )
     sim.add_argument(
         "--report-interval", type=int, default=100, help="Ticks between status lines"
     )
@@ -83,25 +89,38 @@ def cmd_generate(args: argparse.Namespace) -> int:
 def cmd_simulate(args: argparse.Namespace) -> int:
     world = World(seed=args.seed, size=args.size)
     sim = Simulation(world)
-    settlement = sim.spawn_settlement()
+    settlements = sim.spawn_settlements(count=args.settlements)
 
     print(
         f"Simulating seed={args.seed} for {args.ticks} ticks "
-        f"(settlement '{settlement.name}' at {settlement.spawn_x},{settlement.spawn_y})"
+        f"({len(settlements)} settlements)"
     )
-    print(sim.status_line(settlement))
+    for s in settlements:
+        print(
+            f"  '{s.name}' at {s.spawn_x},{s.spawn_y}"
+        )
+    any_alive = True
     for _ in range(args.ticks):
         sim.step()
-        if sim.tick % args.report_interval == 0 or not settlement.is_alive:
-            print(sim.status_line(settlement))
-            if not settlement.is_alive:
-                print(f"Settlement collapsed at tick {settlement.destroyed_at_tick}")
+        if sim.tick % args.report_interval == 0 or not any_alive:
+            print()
+            for s in settlements:
+                print(f"  [{s.name}] {sim.status_line(s)}")
+            routes = sim.active_routes()
+            if routes:
+                total = sum(r.transfers for r in routes)
+                print(f"  trade: {len(routes)} active routes, {total} units moved")
+            any_alive = any(s.is_alive for s in settlements)
+            if not any_alive:
+                print("All settlements have collapsed.")
                 break
 
     if not args.no_save:
         store = WorldStore(args.db)
         try:
-            world_id = store.save_world(world, sim.settlements)
+            world_id = store.save_world(
+                world, sim.settlements, trade_routes=sim.trade_routes
+            )
         finally:
             store.close()
         print(f"\nSaved to {args.db} (world_id={world_id})")

@@ -16,21 +16,25 @@ def test_simulate_no_save_deterministic(capsys):
 
 def test_simulate_persists_final_state(tmp_path, capsys):
     db = tmp_path / "world.db"
-    rc = main(["simulate", "--seed", "42", "--ticks", "120", "--db", str(db)])
+    rc = main(
+        ["simulate", "--seed", "42", "--ticks", "120", "--settlements", "2",
+         "--db", str(db)]
+    )
     assert rc == 0
     conn = sqlite3.connect(db)
     try:
         worlds = conn.execute("SELECT COUNT(*) FROM worlds").fetchone()[0]
         snaps = conn.execute("SELECT COUNT(*) FROM snapshots").fetchone()[0]
         settle = conn.execute("SELECT COUNT(*) FROM settlements").fetchone()[0]
+        res_rows = conn.execute("SELECT COUNT(*) FROM resources").fetchone()[0]
     finally:
         conn.close()
-    assert (worlds, snaps, settle) == (1, 1, 1)
+    assert (worlds, snaps, settle, res_rows) == (1, 1, 2, 2)
 
 
 def test_simulate_reports_growth(capsys):
     main(["simulate", "--seed", "99", "--ticks", "200", "--report-interval", "100",
-          "--no-save"])
+          "--settlements", "1", "--no-save"])
     out = capsys.readouterr().out
     # With a food-rich spawn the population should grow within 200 ticks.
     lines = [ln for ln in out.splitlines() if "pop" in ln]

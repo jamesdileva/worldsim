@@ -7,6 +7,7 @@ after spawn (architecture_detailed.md A1).
 from __future__ import annotations
 
 import random
+import uuid
 from collections import deque
 from dataclasses import dataclass, field
 
@@ -45,6 +46,16 @@ BUILD_PRIORITY = [
 # sawmills/mines exist.
 GATHER_RATE = 0.25
 
+# Multi-spawn (minimal Sprint 9 pull-forward) and trade (Sprint 4).
+DEFAULT_SETTLEMENT_COUNT = 3
+SPAWN_MIN_DISTANCE = 32
+TRADE_INTERVAL_TICKS = 24
+TRADE_AMOUNT_PER_TICK = 1.0
+# Resources eligible for trade, in deterministic evaluation order.
+TRADE_RESOURCES = ("food", "wood", "stone", "metal")
+# Economic collapse: any inventory < 0 sustained this long costs population.
+COLLAPSE_INTERVAL_TICKS = 48
+
 # Spawn search: best-food 3x3 neighborhood within the central region.
 SPAWN_SEARCH_RADIUS = 64
 
@@ -56,15 +67,34 @@ _NAME_SYLLABLES = [
 NAME_SEED_OFFSET = 2_000_000
 
 
-def generate_name(seed: int) -> str:
-    rng = random.Random((seed + NAME_SEED_OFFSET) & 0x7FFFFFFF)
+def generate_name(seed: int, index: int = 0) -> str:
+    rng = random.Random((seed + NAME_SEED_OFFSET + index * 7919) & 0x7FFFFFFF)
     return "".join(rng.choice(_NAME_SYLLABLES) for _ in range(3)).capitalize()
+
+
+@dataclass
+class TradeRoute:
+    """A trade link between two settlements (Sprint 4).
+
+    Direction-agnostic: each tick the donor is whichever side holds more of
+    the resource the other side needs most. Transfers 1 unit/tick."""
+
+    source_id: str
+    dest_id: str
+    established_tick: int
+    transfers: int = 0
+    active: bool = True
+    id: str = field(default_factory=lambda: str(uuid.uuid4()))
+
+    def partner_of(self, settlement_id: str) -> str:
+        return self.dest_id if settlement_id == self.source_id else self.source_id
 
 
 @dataclass
 class Simulation:
     world: World
     settlements: list[Settlement] = field(default_factory=list)
+    trade_routes: list[TradeRoute] = field(default_factory=list)
 
     @property
     def tick(self) -> int:
@@ -74,10 +104,15 @@ class Simulation:
     # Spawning
     # ------------------------------------------------------------------
 
-    def find_spawn_location(self) -> tuple[int, int]:
+    def find_spawn_location(
+        self,
+        exclude: list[tuple[int, int]] | None = None,
+        min_distance: int = 0,
+    ) -> tuple[int, int] | None:
         """Deterministically pick the tile whose 3x3 neighborhood has the
-        highest total food yield within the central search region.
-        Returns (row, col)."""
+        highest total food yield within the central search region, at least
+        min_distance (Chebyshev) from every excluded spawn. Returns
+        (row, col), or None if no candidate exists."""
         size = self.world.size
         center = size // 2
         r = SPAWN_SEARCH_RADIUS
@@ -88,9 +123,17 @@ class Simulation:
         # Valid-mode convolution: entry (i, j) is the sum of the 3x3 window
         # whose CENTER is at (y0 + i + 1, x0 + j + 1).
         neighborhood_sum = self._convolve3x3(food[y0:y1, x0:x1], kernel)
-        flat_idx = int(np.argmax(neighborhood_sum))
-        dy, dx = np.unravel_index(flat_idx, neighborhood_sum.shape)
-        return int(y0 + dy + 1), int(x0 + dx + 1)
+        order = np.argsort(neighborhood_sum, axis=None)[::-1]
+        exclude = exclude or []
+        for flat_idx in order:
+            dy, dx = np.unravel_index(int(flat_idx), neighborhood_sum.shape)
+            row, col = int(y0 + dy + 1), int(x0 + dx + 1)
+            if all(
+                max(abs(row - ey), abs(col - ex)) >= min_distance
+                for ey, ex in exclude
+            ):
+                return row, col
+        return None
 
     @staticmethod
     def _convolve3x3(grid: np.ndarray, kernel: np.ndarray) -> np.ndarray:
@@ -106,7 +149,7 @@ class Simulation:
     def spawn_settlement(self) -> Settlement:
         row, col = self.find_spawn_location()
         settlement = Settlement(
-            name=generate_name(self.world.seed),
+            name=generate_name(self.world.seed, len(self.settlements)),
             spawn_x=col,
             spawn_y=row,
             created_at_tick=self.tick,
@@ -115,6 +158,38 @@ class Simulation:
         idx = len(self.settlements) - 1
         self._claim_tiles(settlement, idx, initial=True)
         return settlement
+
+    def spawn_settlements(
+        self,
+        count: int = DEFAULT_SETTLEMENT_COUNT,
+        min_distance: int = SPAWN_MIN_DISTANCE,
+    ) -> list[Settlement]:
+        """Spawn up to `count` settlements at mutually distant food-rich
+        sites. If space runs out the distance constraint is relaxed so
+        spawning never silently fails."""
+        spawns: list[tuple[int, int]] = [
+            (s.spawn_y, s.spawn_x) for s in self.settlements
+        ]
+        spawned: list[Settlement] = []
+        for _ in range(count):
+            location = self.find_spawn_location(spawns, min_distance)
+            if location is None and min_distance > 0:
+                location = self.find_spawn_location(spawns, 0)
+            if location is None:
+                break
+            spawns.append(location)
+            row, col = location
+            settlement = Settlement(
+                name=generate_name(self.world.seed, len(self.settlements)),
+                spawn_x=col,
+                spawn_y=row,
+                created_at_tick=self.tick,
+            )
+            self.settlements.append(settlement)
+            idx = len(self.settlements) - 1
+            self._claim_tiles(settlement, idx, initial=True)
+            spawned.append(settlement)
+        return spawned
 
     # ------------------------------------------------------------------
     # Territory
@@ -374,6 +449,115 @@ class Simulation:
                         return
 
     # ------------------------------------------------------------------
+    # Trade (Sprint 4)
+    # ------------------------------------------------------------------
+
+    def settlement_by_id(self, settlement_id: str) -> Settlement | None:
+        for s in self.settlements:
+            if s.id == settlement_id:
+                return s
+        return None
+
+    @staticmethod
+    def _amounts(settlement: Settlement) -> dict[str, float]:
+        amounts = dict(sorted(settlement.resource_inventory.items()))
+        amounts["food"] = settlement.food_stock
+        return {r: amounts.get(r, 0.0) for r in TRADE_RESOURCES}
+
+    def _territories_adjacent(self, idx_a: int, idx_b: int) -> bool:
+        """True if any tile of A is within 1 tile of any tile of B."""
+        owned_a = self.world.ownership == idx_a
+        owned_b = self.world.ownership == idx_b
+        grown = owned_a.copy()
+        for dy in (-1, 0, 1):
+            for dx in (-1, 0, 1):
+                if dy == 0 and dx == 0:
+                    continue
+                shifted = np.zeros_like(owned_a)
+                ys = slice(max(dy, 0), self.world.size + min(dy, 0))
+                xs = slice(max(dx, 0), self.world.size + min(dx, 0))
+                yd = slice(max(-dy, 0), self.world.size + min(-dy, 0))
+                xd = slice(max(-dx, 0), self.world.size + min(-dx, 0))
+                shifted[yd, xd] = owned_a[ys, xs]
+                grown |= shifted
+        return bool(np.logical_and(grown, owned_b).any())
+
+    def can_establish_route(self, a: Settlement, b: Settlement) -> bool:
+        if a is b or not (a.is_alive and b.is_alive):
+            return False
+        for route in self.trade_routes:
+            if not route.active:
+                continue
+            ids = {route.source_id, route.dest_id}
+            if a.id in ids and b.id in ids:
+                return False
+        return self._territories_adjacent(
+            self.settlements.index(a), self.settlements.index(b)
+        )
+
+    def establish_route(
+        self, source: Settlement, dest: Settlement
+    ) -> TradeRoute | None:
+        if not self.can_establish_route(source, dest):
+            return None
+        route = TradeRoute(
+            source_id=source.id,
+            dest_id=dest.id,
+            established_tick=self.tick,
+        )
+        self.trade_routes.append(route)
+        return route
+
+    def _trade_tick(self, route: TradeRoute) -> None:
+        """Move 1 unit of the best-arbitrage resource across the route."""
+        source = self.settlement_by_id(route.source_id)
+        dest = self.settlement_by_id(route.dest_id)
+        if source is None or dest is None or not (
+            source.is_alive and dest.is_alive
+        ):
+            route.active = False
+            return
+        amounts_src = self._amounts(source)
+        amounts_dst = self._amounts(dest)
+        donor: Settlement | None = None
+        receiver: Settlement | None = None
+        best_resource: str | None = None
+        best_gain = 0.0
+        for resource in TRADE_RESOURCES:
+            gain_ab = amounts_src[resource] - amounts_dst[resource]
+            gain_ba = amounts_dst[resource] - amounts_src[resource]
+            if gain_ab > best_gain:
+                best_gain, best_resource = gain_ab, resource
+                donor, receiver = source, dest
+            if gain_ba > best_gain:
+                best_gain, best_resource = gain_ba, resource
+                donor, receiver = dest, source
+        if donor is None or receiver is None or best_resource is None:
+            return
+        if best_resource == "food":
+            donor.food_stock -= TRADE_AMOUNT_PER_TICK
+            receiver.food_stock += TRADE_AMOUNT_PER_TICK
+        else:
+            donor.resource_inventory[best_resource] -= TRADE_AMOUNT_PER_TICK
+            receiver.resource_inventory[best_resource] = (
+                receiver.resource_inventory.get(best_resource, 0.0)
+                + TRADE_AMOUNT_PER_TICK
+            )
+        route.transfers += 1
+
+    def _auto_trade_rule(self) -> None:
+        """Connect every adjacent, unlinked settlement pair."""
+        for i, a in enumerate(self.settlements):
+            if not a.is_alive:
+                continue
+            for b in self.settlements[i + 1 :]:
+                if b.is_alive:
+                    self.establish_route(a, b)
+
+    def active_routes(self) -> list[TradeRoute]:
+        return [r for r in self.trade_routes if r.active]
+
+    # ------------------------------------------------------------------
     # Tick loop
     # ------------------------------------------------------------------
 
@@ -434,13 +618,22 @@ class Simulation:
         for res, amount in produced.items():
             inv[res] = inv.get(res, 0.0) + amount
 
+    def _kill(self, settlement: Settlement) -> None:
+        settlement.destroyed_at_tick = self.tick
+        self.release_territory(settlement)
+        for route in self.trade_routes:
+            if settlement.id in (route.source_id, route.dest_id):
+                route.active = False
+
     def step(self) -> None:
         """Advance the simulation by exactly one tick."""
         self.world.tick += 1
         for idx, settlement in enumerate(self.settlements):
             if not settlement.is_alive:
                 continue
-            self._process_build_queue(settlement)
+            # Scarcity (any negative inventory) halves construction rate.
+            if not settlement.is_in_scarcity or self.tick % 2 == 0:
+                self._process_build_queue(settlement)
             if self.tick % BUILD_INTERVAL_TICKS == 0:
                 self._auto_build_rule(settlement)
             if self.tick % ROAD_INTERVAL_TICKS == 0:
@@ -453,15 +646,34 @@ class Simulation:
             was_alive = settlement.is_alive
             settlement.step_population()
             if was_alive and not settlement.is_alive:
-                settlement.destroyed_at_tick = self.tick
-                self.release_territory(settlement)
+                self._kill(settlement)
                 continue
+            # Economic collapse: negative inventory sustained too long.
+            if settlement.is_in_scarcity:
+                settlement.negative_inventory_progress += 1
+                if (
+                    settlement.negative_inventory_progress
+                    >= COLLAPSE_INTERVAL_TICKS
+                ):
+                    settlement.negative_inventory_progress = 0
+                    settlement.population -= 1
+                    if not settlement.is_alive:
+                        self._kill(settlement)
+                        continue
+            else:
+                settlement.negative_inventory_progress = 0
             if (
                 settlement.is_alive
                 and settlement.net_food_rate > CLAIM_FOOD_SURPLUS_THRESHOLD
                 and self.tick % CLAIM_INTERVAL_TICKS == 0
             ):
                 self.claim_territory(settlement)
+        # Trade: establish new routes periodically, transfer every tick.
+        if self.tick % TRADE_INTERVAL_TICKS == 0:
+            self._auto_trade_rule()
+        for route in self.trade_routes:
+            if route.active:
+                self._trade_tick(route)
 
     def run(self, ticks: int) -> None:
         for _ in range(ticks):
@@ -476,14 +688,20 @@ class Simulation:
             territory = len(self.territory_of(settlement))
             buildings = sum(self.buildings_of(settlement).values())
             roads = len(self.roads_of(settlement))
+            routes = sum(
+                1
+                for r in self.active_routes()
+                if settlement.id in (r.source_id, r.dest_id)
+            )
             state = "alive"
         else:
             territory = 0
             buildings = 0
             roads = 0
+            routes = 0
             state = "DEAD"
         return (
             f"tick {self.tick:>6} | pop {settlement.population:>4} | "
             f"food {settlement.food_stock:>9.1f} | territory {territory:>4} | "
-            f"bld {buildings:>3} | road {roads:>3} | {state}"
+            f"bld {buildings:>3} | road {roads:>3} | route {routes} | {state}"
         )

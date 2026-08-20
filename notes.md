@@ -5,6 +5,93 @@ Decisions worth remembering are marked **[DECISION]**.
 
 ---
 
+## Session 4 — 2026-08-20 — Sprint 4 (+ minimal Sprint 9 pull-forward): Economy, Trade & Multi-Spawn
+
+**Scope:** Sprint 4 (economy/trade) combined with a *minimal* slice of
+Sprint 9 (multi-spawn) — trade is meaningless with one settlement. Full
+Sprint 9 content (raids, relations, contested tiles) stays put.
+
+### What was built
+
+- Multi-spawn: `spawn_settlements(n)` — seeded best-food sites ≥32 tiles
+  apart (Chebyshev), distance relaxed before giving up; unique per-settlement
+  names via index-derived seed offset
+- `TradeRoute` dataclass + `establish_route()` — allowed only between
+  adjacent territories (8-neighborhood dilation check), one route per pair
+- Direction-agnostic transfer: each tick the donor is whichever side holds
+  more of the resource the other needs most; 1 unit/tick; food tradable via
+  food_stock
+- Auto-trade rule: every 24 ticks connect all adjacent unlinked pairs
+- Economic collapse: any inventory < 0 sustained 48 ticks → −1 population;
+  timer resets on recovery
+- Scarcity slowdown: negative inventory halves build-queue processing rate
+- Death now deactivates the dead settlement's trade routes (`_kill` helper)
+- SQLite: `resources` (per-settlement inventory snapshots) + `trade_routes`
+  tables; routes also serialized in snapshot JSON for exact round-trips
+- CLI: `--settlements N` (default 3), per-settlement status lines + trade
+  summary
+- Tests: 80 passing (19 new)
+
+### Decisions
+
+- **[DECISION] Pulled minimal multi-spawn forward from Sprint 9.** Trade
+  requires neighbors; raids/relations/contested tiles remain in Sprint 9.
+- **[DECISION] Trade adjacency = territories within 1 tile**, not road-path
+  connectivity. Spec says "connected by roads", but road networks don't
+  interconnect yet; adjacency is the honest minimal proxy. Revisit when
+  networks meet (§9.3).
+- **[DECISION] Routes are direction-agnostic links**: donor/receiver chosen
+  per tick by largest amount imbalance across {food, wood, stone, metal}.
+  Simpler and more robust than fixed-direction routes with auto resource
+  selection.
+- **[DECISION] Collapse is spec-literal** (−1 pop per 48 ticks of negative
+  inventory) and stacks with starvation — harsh but matches the doc.
+- **[DECISION] Scarcity = any inventory < 0**; effect is half-rate
+  construction ("poverty"), per spec's "scarcity leads to economic slowdown".
+- **[DECISION] Spawn distance relaxation:** if no site satisfies 32-tile
+  separation, retry unconstrained rather than failing — keeps small maps and
+  high counts working deterministically.
+- **[DECISION] `deserialize_world` now returns a 3-tuple**
+  (world, settlements, trade_routes). Minor API break, updated all callers.
+
+### Gotchas / bugs found & fixed
+
+- All settlements got identical names (name seed used only world seed) —
+  fixed with index-derived offset (7919 × index).
+- Collapse test initially failed because the settlement *grew* while
+  collapsing (positive food stock); test now isolates income to observe the
+  collapse mechanic cleanly.
+- Scarcity test initially set wood negative, which made the queued Farm
+  *unaffordable* — revealing that an unaffordable queue head blocks the queue
+  indefinitely (see known issues).
+
+### Known issues / deferred
+
+- Unaffordable build-queue head blocks the queue until resources recover
+  (auto-rule only enqueues affordable items so it rarely triggers naturally).
+- Trade value "computed from production efficiency and distance" (spec) not
+  implemented — routes just count transfers; metrics come with the dashboard.
+- Road-connected trade (spec-literal) deferred until road networks can span
+  settlements.
+- `_territories_adjacent` is O(n²) pair checks over full-grid masks every 24
+  ticks — fine at n=3, revisit at Sprint 9 scale.
+
+### Acceptance criteria status
+
+- ✅ Two settlements establish a trade route when adjacent
+- ✅ Route transfers 1 resource/tick (490 units moved by tick 1000 in demo)
+- ✅ Economic collapse: inventory < 0 for 48 ticks → population loss
+- ✅ Economic metrics tracked and stored (`resources` table)
+- ✅ Bonus: multi-spawn (3 default), scarcity slowdown, route persistence
+
+### Next up (Sprint 5)
+
+Disasters, death & recovery: Drought/Fire/Plague, climate-driven frequency,
+collapse → neutral ruins, spontaneous re-settlement after 500 ticks,
+happiness/stability system, 2x recovery on reclaimed ruins.
+
+---
+
 ## Session 3 — 2026-08-20 — Sprint 3: Buildings, Roads & Infrastructure
 
 **Scope:** Phase 1 / Sprint 3 — Farm/Sawmill/Mine/Granary with costs and

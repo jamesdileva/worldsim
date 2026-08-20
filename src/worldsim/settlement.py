@@ -38,12 +38,19 @@ class Settlement:
     # Counters tracking progress toward the next growth/starvation event.
     growth_progress: int = 0
     starvation_progress: int = 0
+    # Ticks spent with any negative inventory (economic collapse timer).
+    negative_inventory_progress: int = 0
     # Food income minus consumption for the most recent tick (set by sim).
     net_food_rate: float = 0.0
 
     @property
     def is_alive(self) -> bool:
         return self.population > 0
+
+    @property
+    def is_in_scarcity(self) -> bool:
+        """True while any resource inventory is negative (poverty slowdown)."""
+        return any(v < 0 for v in self.resource_inventory.values())
 
     def consume_food(
         self, income: float, capacity: float | None = None
