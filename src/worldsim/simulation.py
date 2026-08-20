@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import random
 import uuid
+import zlib
 from collections import deque
 from dataclasses import dataclass, field
 
@@ -21,7 +22,19 @@ from .buildings import (
     Improvement,
     ROAD_COST_STONE,
 )
-from .settlement import Settlement
+from .disasters import (
+    BASE_EVENT_CHANCE,
+    DisasterEvent,
+    DisasterType,
+    DROUGHT_FARM_MULTIPLIER,
+    EVENT_CHECK_INTERVAL_TICKS,
+    PLAGUE_MORTALITY,
+    roll_event,
+)
+from .settlement import (
+    LOW_HAPPINESS_COLLAPSE_TICKS,
+    Settlement,
+)
 from .tiles import TERRAIN_PROFILES, TerrainType
 from .world import UNOWNED, World
 
@@ -56,6 +69,12 @@ TRADE_RESOURCES = ("food", "wood", "stone", "metal")
 # Economic collapse: any inventory < 0 sustained this long costs population.
 COLLAPSE_INTERVAL_TICKS = 48
 
+# Ruins & spontaneous re-settlement (Sprint 5).
+RUIN_SEED_OFFSET = 4_000_000
+RUIN_RESETTLE_MIN_AGE = 500
+RUIN_RESETTLE_CHANCE = 0.10
+RUIN_GROWTH_MULTIPLIER = 2
+
 # Spawn search: best-food 3x3 neighborhood within the central region.
 SPAWN_SEARCH_RADIUS = 64
 
@@ -70,6 +89,21 @@ NAME_SEED_OFFSET = 2_000_000
 def generate_name(seed: int, index: int = 0) -> str:
     rng = random.Random((seed + NAME_SEED_OFFSET + index * 7919) & 0x7FFFFFFF)
     return "".join(rng.choice(_NAME_SYLLABLES) for _ in range(3)).capitalize()
+
+
+@dataclass
+class RuinSite:
+    """A collapsed settlement's remains (Sprint 5).
+
+    Remembered so the site can spontaneously re-settle after 500 ticks and
+    grant 2x growth to settlements founded adjacent to the former capital."""
+
+    settlement_id: str
+    name: str
+    spawn_x: int
+    spawn_y: int
+    collapse_tick: int
+    id: str = field(default_factory=lambda: str(uuid.uuid4()))
 
 
 @dataclass
@@ -95,6 +129,8 @@ class Simulation:
     world: World
     settlements: list[Settlement] = field(default_factory=list)
     trade_routes: list[TradeRoute] = field(default_factory=list)
+    disaster_events: list[DisasterEvent] = field(default_factory=list)
+    ruins: list[RuinSite] = field(default_factory=list)
 
     @property
     def tick(self) -> int:
@@ -558,6 +594,155 @@ class Simulation:
         return [r for r in self.trade_routes if r.active]
 
     # ------------------------------------------------------------------
+    # Disasters (Sprint 5)
+    # ------------------------------------------------------------------
+
+    def _settlement_affected(
+        self, settlement: Settlement, event: DisasterEvent
+    ) -> bool:
+        """Approximate zone overlap: settlement spawn within radius plus a
+        territory-reach margin (avoids per-tick full-grid scans)."""
+        reach = event.radius + 16
+        return (
+            max(
+                abs(settlement.spawn_x - event.center_x),
+                abs(settlement.spawn_y - event.center_y),
+            )
+            <= reach
+        )
+
+    def _drought_multiplier(self, settlement: Settlement) -> float:
+        mult = 1.0
+        for event in self.disaster_events:
+            if (
+                event.type == DisasterType.DROUGHT
+                and event.is_active(self.tick)
+                and self._settlement_affected(settlement, event)
+            ):
+                mult *= DROUGHT_FARM_MULTIPLIER
+        return mult
+
+    def _apply_fire(self, event: DisasterEvent) -> int:
+        """Destroy improvements on forest tiles in the zone. Returns count."""
+        forest = self.world.terrain == TerrainType.FOREST.value
+        y0 = max(0, event.center_y - event.radius)
+        y1 = min(self.world.size, event.center_y + event.radius + 1)
+        x0 = max(0, event.center_x - event.radius)
+        x1 = min(self.world.size, event.center_x + event.radius + 1)
+        zone = np.zeros_like(forest)
+        zone[y0:y1, x0:x1] = True
+        burned = np.logical_and(forest, zone)
+        burned = np.logical_and(
+            burned, self.world.improvements != Improvement.NONE.value
+        )
+        count = int(burned.sum())
+        self.world.improvements[burned] = Improvement.NONE.value
+        return count
+
+    def _apply_plague(self, event: DisasterEvent) -> None:
+        for settlement in self.settlements:
+            if settlement.is_alive and self._settlement_affected(
+                settlement, event
+            ):
+                settlement.population = int(
+                    settlement.population * (1.0 - PLAGUE_MORTALITY)
+                )
+                if not settlement.is_alive:
+                    self._kill(settlement)
+
+    def _check_disasters(self) -> None:
+        event = roll_event(self.world.seed, self.tick, self.world.size)
+        if event is None:
+            return
+        self.disaster_events.append(event)
+        if event.type == DisasterType.FIRE:
+            self._apply_fire(event)
+        elif event.type == DisasterType.PLAGUE:
+            self._apply_plague(event)
+
+    def active_disasters(self) -> list[DisasterEvent]:
+        return [e for e in self.disaster_events if e.is_active(self.tick)]
+
+    # ------------------------------------------------------------------
+    # Ruins & re-settlement (Sprint 5)
+    # ------------------------------------------------------------------
+
+    def _record_ruin(self, settlement: Settlement) -> RuinSite:
+        ruin = RuinSite(
+            settlement_id=settlement.id,
+            name=f"Ruins of {settlement.name}",
+            spawn_x=settlement.spawn_x,
+            spawn_y=settlement.spawn_y,
+            collapse_tick=self.tick,
+        )
+        self.ruins.append(ruin)
+        return ruin
+
+    def _find_free_tile_near(self, cx: int, cy: int) -> tuple[int, int] | None:
+        """Nearest unowned land tile to (cx, cy) by expanding rings."""
+        size = self.world.size
+        for r in range(0, size):
+            for dy in range(-r, r + 1):
+                for dx in range(-r, r + 1):
+                    if max(abs(dy), abs(dx)) != r:
+                        continue
+                    y, x = cy + dy, cx + dx
+                    if not (0 <= y < size and 0 <= x < size):
+                        continue
+                    if (
+                        self.world.ownership[y, x] == UNOWNED
+                        and TerrainType(self.world.terrain[y, x])
+                        != TerrainType.WATER
+                    ):
+                        return y, x
+        return None
+
+    def _try_resettle_ruin(self, ruin: RuinSite) -> Settlement | None:
+        age = self.tick - ruin.collapse_tick
+        if age < RUIN_RESETTLE_MIN_AGE or age % 100 != 0:
+            return None
+        rng = random.Random(
+            (self.world.seed ^ RUIN_SEED_OFFSET)
+            + zlib.crc32(ruin.id.encode()) * 31
+            + age
+        )
+        if rng.random() >= RUIN_RESETTLE_CHANCE:
+            return None
+        location = self._find_free_tile_near(ruin.spawn_x, ruin.spawn_y)
+        if location is None:
+            return None
+        row, col = location
+        settlement = Settlement(
+            name=generate_name(self.world.seed, len(self.settlements)),
+            spawn_x=col,
+            spawn_y=row,
+            created_at_tick=self.tick,
+            ruin_origin=ruin.id,
+        )
+        self.settlements.append(settlement)
+        idx = len(self.settlements) - 1
+        self._claim_tiles(settlement, idx, initial=True)
+        return settlement
+
+    def _ruin_adjacent(self, settlement: Settlement) -> bool:
+        """True if any owned tile is within 2 tiles of the origin ruin."""
+        if settlement.ruin_origin is None:
+            return False
+        ruin = next(
+            (r for r in self.ruins if r.id == settlement.ruin_origin), None
+        )
+        if ruin is None:
+            return False
+        owned = np.argwhere(self.world.ownership == self.settlements.index(settlement))
+        for y, x in owned:
+            if (
+                max(abs(int(y) - ruin.spawn_y), abs(int(x) - ruin.spawn_x))
+                <= 2
+            ):
+                return True
+        return False
+
+    # ------------------------------------------------------------------
     # Tick loop
     # ------------------------------------------------------------------
 
@@ -618,16 +803,21 @@ class Simulation:
         for res, amount in produced.items():
             inv[res] = inv.get(res, 0.0) + amount
 
-    def _kill(self, settlement: Settlement) -> None:
+    def _kill(self, settlement: Settlement) -> RuinSite:
+        settlement.population = 0
         settlement.destroyed_at_tick = self.tick
+        ruin = self._record_ruin(settlement)
         self.release_territory(settlement)
         for route in self.trade_routes:
             if settlement.id in (route.source_id, route.dest_id):
                 route.active = False
+        return ruin
 
     def step(self) -> None:
         """Advance the simulation by exactly one tick."""
         self.world.tick += 1
+        if self.tick % EVENT_CHECK_INTERVAL_TICKS == 0:
+            self._check_disasters()
         for idx, settlement in enumerate(self.settlements):
             if not settlement.is_alive:
                 continue
@@ -639,13 +829,30 @@ class Simulation:
             if self.tick % ROAD_INTERVAL_TICKS == 0:
                 self._auto_road_rule(settlement)
             self._produce_resources(settlement)
+            income = self.food_income(settlement) * self._drought_multiplier(
+                settlement
+            )
             settlement.consume_food(
-                self.food_income(settlement),
+                income,
                 capacity=self.food_capacity(settlement),
             )
             was_alive = settlement.is_alive
-            settlement.step_population()
+            growth_multiplier = (
+                RUIN_GROWTH_MULTIPLIER if self._ruin_adjacent(settlement) else 1
+            )
+            settlement.step_population(growth_multiplier)
+            settlement.step_happiness(
+                building_count=sum(self.buildings_of(settlement).values())
+            )
             if was_alive and not settlement.is_alive:
+                self._kill(settlement)
+                continue
+            # Collapse via sustained misery (happiness < 0.1 for 100 ticks).
+            if (
+                settlement.is_alive
+                and settlement.low_happiness_progress
+                >= LOW_HAPPINESS_COLLAPSE_TICKS
+            ):
                 self._kill(settlement)
                 continue
             # Economic collapse: negative inventory sustained too long.
@@ -674,6 +881,9 @@ class Simulation:
         for route in self.trade_routes:
             if route.active:
                 self._trade_tick(route)
+        # Ruins may spontaneously re-settle.
+        for ruin in list(self.ruins):
+            self._try_resettle_ruin(ruin)
 
     def run(self, ticks: int) -> None:
         for _ in range(ticks):

@@ -19,6 +19,16 @@ STARTING_FOOD = 50
 STARTING_RESOURCES = {"wood": 30.0, "stone": 15.0}
 FOOD_PER_WORKER_PER_TICK = 1.0
 
+# Happiness/stability (Sprint 5).
+STARTING_HAPPINESS = 0.5
+HAPPINESS_DECAY_AFTER_TICKS = 10  # consecutive negative-net-food ticks
+HAPPINESS_DECAY_RATE = 0.01
+HAPPINESS_RECOVERY_RATE = 0.005
+HAPPINESS_MAX = 1.0
+HAPPINESS_MIN = 0.0
+LOW_HAPPINESS_THRESHOLD = 0.1
+LOW_HAPPINESS_COLLAPSE_TICKS = 100
+
 
 @dataclass
 class Settlement:
@@ -40,6 +50,12 @@ class Settlement:
     starvation_progress: int = 0
     # Ticks spent with any negative inventory (economic collapse timer).
     negative_inventory_progress: int = 0
+    # Happiness/stability (Sprint 5).
+    happiness: float = STARTING_HAPPINESS
+    negative_food_streak: int = 0
+    low_happiness_progress: int = 0
+    # Set when founded on/near ruins: id of the origin RuinSite (Sprint 5).
+    ruin_origin: str | None = None
     # Food income minus consumption for the most recent tick (set by sim).
     net_food_rate: float = 0.0
 
@@ -51,6 +67,30 @@ class Settlement:
     def is_in_scarcity(self) -> bool:
         """True while any resource inventory is negative (poverty slowdown)."""
         return any(v < 0 for v in self.resource_inventory.values())
+
+    def step_happiness(self, building_count: int) -> None:
+        """Advance happiness by one tick (Sprint 5).
+
+        Decays after 10+ consecutive ticks of negative net food; recovers
+        slowly otherwise, scaled slightly by building quality."""
+        if self.net_food_rate < 0:
+            self.negative_food_streak += 1
+        else:
+            self.negative_food_streak = 0
+        if self.negative_food_streak > HAPPINESS_DECAY_AFTER_TICKS:
+            self.happiness = max(
+                HAPPINESS_MIN, self.happiness - HAPPINESS_DECAY_RATE
+            )
+        else:
+            quality_bonus = min(building_count, 10) * 0.0005
+            self.happiness = min(
+                HAPPINESS_MAX,
+                self.happiness + HAPPINESS_RECOVERY_RATE + quality_bonus,
+            )
+        if self.happiness < LOW_HAPPINESS_THRESHOLD:
+            self.low_happiness_progress += 1
+        else:
+            self.low_happiness_progress = 0
 
     def consume_food(
         self, income: float, capacity: float | None = None
@@ -67,14 +107,14 @@ class Settlement:
         self.food_stock += effective - consumption
         self.net_food_rate = income - consumption
 
-    def step_population(self) -> None:
+    def step_population(self, growth_multiplier: int = 1) -> None:
         """Advance growth/starvation counters by one tick."""
         if not self.is_alive:
             return
         if self.food_stock > 0:
             self.starvation_progress = 0
-            self.growth_progress += 1
-            if self.growth_progress >= GROWTH_INTERVAL_TICKS:
+            self.growth_progress += growth_multiplier
+            while self.growth_progress >= GROWTH_INTERVAL_TICKS:
                 self.growth_progress -= GROWTH_INTERVAL_TICKS
                 self.population += 1
         else:

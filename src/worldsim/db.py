@@ -17,8 +17,9 @@ from pathlib import Path
 
 import numpy as np
 
+from .disasters import DisasterEvent, DisasterType
 from .settlement import Settlement
-from .simulation import TradeRoute
+from .simulation import RuinSite, TradeRoute
 from .world import UNOWNED, World
 
 DEFAULT_DB_PATH = Path("data/world_sim/world.db")
@@ -142,10 +143,58 @@ def _decode_route(obj: dict) -> TradeRoute:
     )
 
 
+def _encode_ruin(r: RuinSite) -> dict:
+    return {
+        "id": r.id,
+        "settlement_id": r.settlement_id,
+        "name": r.name,
+        "spawn_x": r.spawn_x,
+        "spawn_y": r.spawn_y,
+        "collapse_tick": r.collapse_tick,
+    }
+
+
+def _decode_ruin(obj: dict) -> RuinSite:
+    return RuinSite(
+        settlement_id=obj["settlement_id"],
+        name=obj["name"],
+        spawn_x=obj["spawn_x"],
+        spawn_y=obj["spawn_y"],
+        collapse_tick=obj["collapse_tick"],
+        id=obj["id"],
+    )
+
+
+def _encode_disaster(e: DisasterEvent) -> dict:
+    return {
+        "id": e.id,
+        "type": int(e.type),
+        "center_x": e.center_x,
+        "center_y": e.center_y,
+        "radius": e.radius,
+        "start_tick": e.start_tick,
+        "duration": e.duration,
+    }
+
+
+def _decode_disaster(obj: dict) -> DisasterEvent:
+    return DisasterEvent(
+        type=DisasterType(obj["type"]),
+        center_x=obj["center_x"],
+        center_y=obj["center_y"],
+        radius=obj["radius"],
+        start_tick=obj["start_tick"],
+        duration=obj["duration"],
+        id=obj["id"],
+    )
+
+
 def serialize_world(
     world: World,
     settlements: list[Settlement] | None = None,
     trade_routes: list[TradeRoute] | None = None,
+    ruins: list[RuinSite] | None = None,
+    disaster_events: list[DisasterEvent] | None = None,
 ) -> str:
     state = {
         "seed": world.seed,
@@ -158,13 +207,15 @@ def serialize_world(
         "improvements": _encode_array(world.improvements),
         "settlements": [_encode_settlement(s) for s in (settlements or [])],
         "trade_routes": [_encode_route(r) for r in (trade_routes or [])],
+        "ruins": [_encode_ruin(r) for r in (ruins or [])],
+        "disaster_events": [_encode_disaster(e) for e in (disaster_events or [])],
     }
     return json.dumps(state, sort_keys=True)
 
 
 def deserialize_world(
     state_json: str,
-) -> tuple[World, list[Settlement], list[TradeRoute]]:
+) -> tuple[World, list[Settlement], list[TradeRoute], list[RuinSite], list[DisasterEvent]]:
     state = json.loads(state_json)
     world = World(seed=state["seed"], size=state["size"])
     world.tick = state["tick"]
@@ -181,7 +232,11 @@ def deserialize_world(
     trade_routes = [
         _decode_route(obj) for obj in state.get("trade_routes", [])
     ]
-    return world, settlements, trade_routes
+    ruins = [_decode_ruin(obj) for obj in state.get("ruins", [])]
+    disaster_events = [
+        _decode_disaster(obj) for obj in state.get("disaster_events", [])
+    ]
+    return world, settlements, trade_routes, ruins, disaster_events
 
 
 @dataclass
@@ -207,6 +262,8 @@ class WorldStore:
         settlements: list[Settlement] | None = None,
         snapshot_tick: int | None = None,
         trade_routes: list[TradeRoute] | None = None,
+        ruins: list[RuinSite] | None = None,
+        disaster_events: list[DisasterEvent] | None = None,
     ) -> str:
         """Insert a world row, write a snapshot, and upsert settlement,
         resource, and trade-route rows."""
@@ -220,7 +277,13 @@ class WorldStore:
             )
             self._conn.execute(
                 "INSERT INTO snapshots (tick, world_id, state_json) VALUES (?, ?, ?)",
-                (tick, world_id, serialize_world(world, settlements, trade_routes)),
+                (
+                    tick,
+                    world_id,
+                    serialize_world(
+                        world, settlements, trade_routes, ruins, disaster_events
+                    ),
+                ),
             )
             for s in settlements or []:
                 self._conn.execute(
@@ -269,7 +332,13 @@ class WorldStore:
 
     def load_latest_snapshot(
         self, world_id: str
-    ) -> tuple[World, list[Settlement], list[TradeRoute]]:
+    ) -> tuple[
+        World,
+        list[Settlement],
+        list[TradeRoute],
+        list[RuinSite],
+        list[DisasterEvent],
+    ]:
         row = self._conn.execute(
             "SELECT state_json FROM snapshots WHERE world_id = ? "
             "ORDER BY tick DESC LIMIT 1",

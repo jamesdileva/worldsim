@@ -119,7 +119,11 @@ def cmd_simulate(args: argparse.Namespace) -> int:
         store = WorldStore(args.db)
         try:
             world_id = store.save_world(
-                world, sim.settlements, trade_routes=sim.trade_routes
+                world,
+                sim.settlements,
+                trade_routes=sim.trade_routes,
+                ruins=sim.ruins,
+                disaster_events=sim.disaster_events,
             )
         finally:
             store.close()

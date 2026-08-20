@@ -5,6 +5,101 @@ Decisions worth remembering are marked **[DECISION]**.
 
 ---
 
+## Session 5 — 2026-08-20 — Sprint 5: Disasters, Death & Recovery
+
+**Scope:** Phase 1 / Sprint 5 — Drought/Fire/Plague, season-weighted regional
+events, happiness/stability with misery-collapse, ruins + spontaneous
+re-settlement, 2x growth near former capitals.
+
+### What was built
+
+- `disasters.py` — `DisasterType`/`DisasterEvent`, minimal season counter
+  (`(tick // 128) % 4`), season-weighted event rolls every 50 ticks (~10%
+  chance → ~2–4 events/1000 ticks), deterministic event ids (`ev-{seed}-{tick}`)
+- `simulation.py` — regional disaster application (spawn-distance +
+  margin approximation of zone overlap); Fire clears improvements on forest
+  tiles in zone; Plague ×0.7 population; Drought halves farm output while
+  active via `_drought_multiplier()` in the food-income path
+- `RuinSite` records on death (id, name, spawn, collapse tick); ruins live on
+  Simulation and serialize into snapshots
+- Spontaneous re-settlement: ruin age ≥500, 10% chance per 100-tick window
+  (seeded RNG keyed by crc32(ruin.id) — NOT Python `hash()`, see gotchas);
+  new settlement founded at nearest free land tile to the old capital with
+  `ruin_origin` set
+- 2× growth: `step_population(growth_multiplier)` — ruin-origin settlements
+  accumulate double growth progress while any owned tile is within 2 tiles
+  of the former capital
+- Happiness: decays 0.01/tick after >10 consecutive negative-net-food ticks,
+  recovers 0.005 + tiny building-quality bonus; happiness < 0.1 sustained
+  100 ticks → collapse
+- `_kill()` now zeroes population, records the ruin, releases territory,
+  deactivates trade routes — single death path for starvation, plague,
+  economic and misery collapse
+- Tests: 97 passing (17 new)
+
+### Decisions
+
+- **[DECISION] Minimal season counter now** (`128 ticks/season`): disaster
+  weighting needs it; full clock (years, time controls) stays in Sprint 6.
+- **[DECISION] Regional disasters** (center + radius 24) per user choice —
+  enables "one civilization droughts while another thrives" emergent stories.
+  Zone overlap approximated by spawn distance ≤ radius + 16 to avoid per-tick
+  full-grid scans.
+- **[DECISION] Seeded event-RNG** (`seed ^ offset + tick * 7919`): entropy is
+  a pure function of seed+tick so A1 determinism holds. Event ids are
+  deterministic strings, not UUIDs, for byte-level reproducibility.
+- **[DECISION] Happiness affects only the collapse trigger this sprint**
+  (user choice); growth pauses etc. deferred.
+- **[DECISION] Ruins are in-sim records**, no SQLite table (user choice);
+  serialized in snapshot JSON.
+- **[DECISION] Plague can drive population to 0** → routes through the normal
+  death path (`_kill`).
+- **[DECISION] Re-settle placement:** nearest free non-water tile to the old
+  capital (expanding ring search), not the exact old spawn (may be gone).
+
+### Gotchas / bugs found & fixed
+
+- **`hash()` on strings is process-randomized in Python** — using it in the
+  re-settlement RNG would break cross-process reproducibility. Replaced with
+  `zlib.crc32(ruin.id)`.
+- **`_kill()` didn't zero population**: settlements killed by misery-collapse
+  stayed `is_alive` and were re-killed every tick (ruins piling up). Found by
+  the collapse test hanging at progress 386 ≥ 100 without dying.
+- DisasterEvent's default uuid id made two identical rolls compare unequal —
+  fixed with deterministic ids.
+- Happiness *recovers* during the first 10 ticks of famine (streak hasn't
+  tripped decay yet), so misery-collapse lands ~25 ticks later than naive
+  math suggests. Test window widened accordingly.
+
+### Known issues / deferred
+
+- Zone-overlap approximation (spawn distance) misclassifies huge territories
+  at zone edges; revisit if it matters gameplay-wise.
+- No event log/narrative yet — events are data only (Phase 8 concern).
+- Neighbor-relation term of happiness undefined until relations exist.
+- Natural settlement deaths are rare post-Sprint 4 (auto-build + trade are
+  competent); ruins/resettle mostly exercised via forced deaths in tests.
+
+### Acceptance criteria status
+
+- ✅ Drought reduces all farms' yield by 50% for 200 ticks
+- ✅ Fire destroys forest-tile improvements (Sawmill included)
+- ✅ Plague kills 30% of affected populations
+- ✅ Collapsed settlement → neutral ruins (RuinSite recorded, territory freed)
+- ✅ After 500 ticks of ruin, 10% chance per 100 ticks to re-settle
+  (demonstrated: died tick 548 → refounded tick 1648 near old capital)
+- ✅ Happiness decays when net food < 0 for >10 ticks
+- ✅ Recovery rate 2x on tiles adjacent to former capital
+
+### Next up (Sprint 6)
+
+Persistence, save/load & simulation clock: full serialization round-trip CLI
+(`save`/`load`), formal clock (512 ticks/year), time controls, auto-save every
+500 ticks, God Mode action logging. Most plumbing already exists — Sprint 6 is
+largely consolidation.
+
+---
+
 ## Session 4 — 2026-08-20 — Sprint 4 (+ minimal Sprint 9 pull-forward): Economy, Trade & Multi-Spawn
 
 **Scope:** Sprint 4 (economy/trade) combined with a *minimal* slice of
