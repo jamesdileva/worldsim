@@ -14,6 +14,8 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
+from .actions import Action, WIRED_ACTIONS, action_category
+from .agents import Agent, RuleBasedAgent, placeholder_reward
 from .buildings import (
     BASE_FOOD_CAPACITY,
     BUILDING_SPECS,
@@ -131,6 +133,12 @@ class Simulation:
     trade_routes: list[TradeRoute] = field(default_factory=list)
     disaster_events: list[DisasterEvent] = field(default_factory=list)
     ruins: list[RuinSite] = field(default_factory=list)
+    # One agent per settlement, aligned by index (Sprint 7).
+    agents: list[Agent | None] = field(default_factory=list)
+    # Buffered (settlement_id, tick, obs, action, reward, next_obs, done).
+    experience_buffer: list[tuple] = field(default_factory=list)
+    action_counts: dict[int, int] = field(default_factory=dict)
+    _pending_transitions: dict[str, tuple] = field(default_factory=dict)
 
     @property
     def tick(self) -> int:
@@ -182,6 +190,26 @@ class Simulation:
                 out += kernel[ky, kx] * grid[ky : ky + ph, kx : kx + pw]
         return out
 
+    def _register_settlement(
+        self,
+        settlement: Settlement,
+        ruin_origin: str | None = None,
+    ) -> Settlement:
+        """Append a settlement, align its agent slot, and claim 3x3."""
+        settlement.ruin_origin = ruin_origin
+        self.settlements.append(settlement)
+        idx = len(self.settlements) - 1
+        while len(self.agents) < idx:
+            self.agents.append(None)
+        if idx == len(self.agents):
+            self.agents.append(
+                RuleBasedAgent(self.world.seed, idx)
+            )
+        else:
+            self.agents[idx] = RuleBasedAgent(self.world.seed, idx)
+        self._claim_tiles(settlement, idx, initial=True)
+        return settlement
+
     def spawn_settlement(self) -> Settlement:
         row, col = self.find_spawn_location()
         settlement = Settlement(
@@ -190,10 +218,7 @@ class Simulation:
             spawn_y=row,
             created_at_tick=self.tick,
         )
-        self.settlements.append(settlement)
-        idx = len(self.settlements) - 1
-        self._claim_tiles(settlement, idx, initial=True)
-        return settlement
+        return self._register_settlement(settlement)
 
     def spawn_settlements(
         self,
@@ -221,9 +246,7 @@ class Simulation:
                 spawn_y=row,
                 created_at_tick=self.tick,
             )
-            self.settlements.append(settlement)
-            idx = len(self.settlements) - 1
-            self._claim_tiles(settlement, idx, initial=True)
+            self._register_settlement(settlement)
             spawned.append(settlement)
         return spawned
 
@@ -755,9 +778,7 @@ class Simulation:
             created_at_tick=self.tick,
             ruin_origin=ruin.id,
         )
-        self.settlements.append(settlement)
-        idx = len(self.settlements) - 1
-        self._claim_tiles(settlement, idx, initial=True)
+        self._register_settlement(settlement, ruin_origin=ruin.id)
         return settlement
 
     def _ruin_adjacent(self, settlement: Settlement) -> bool:
@@ -777,6 +798,64 @@ class Simulation:
             ):
                 return True
         return False
+
+    # ------------------------------------------------------------------
+    # Agent action dispatch (Sprint 7)
+    # ------------------------------------------------------------------
+
+    def _agent_build(self, settlement: Settlement, btype: BuildingType) -> bool:
+        site = self.find_building_site(settlement, btype)
+        if site is None:
+            return False
+        return self.build_at(settlement, btype, x=site[1], y=site[0])
+
+    def _act_build_farm(self, s: Settlement) -> bool:
+        return self._agent_build(s, BuildingType.FARM)
+
+    def _act_build_sawmill(self, s: Settlement) -> bool:
+        return self._agent_build(s, BuildingType.SAWMILL)
+
+    def _act_build_mine(self, s: Settlement) -> bool:
+        return self._agent_build(s, BuildingType.MINE)
+
+    def _act_build_granary(self, s: Settlement) -> bool:
+        return self._agent_build(s, BuildingType.GRANARY)
+
+    def _act_build_road(self, s: Settlement) -> bool:
+        return self._auto_road_rule(s)
+
+    def _act_expand_road_network(self, s: Settlement) -> bool:
+        return self._auto_road_rule(s)
+
+    def _act_boost_morale(self, s: Settlement) -> bool:
+        """Small happiness bump; costs nothing this sprint."""
+        from .settlement import HAPPINESS_MAX
+
+        s.happiness = min(HAPPINESS_MAX, s.happiness + 0.01)
+        return True
+
+    def _act_claim_territory(self, s: Settlement) -> bool:
+        return len(self.claim_territory(s)) > 0
+
+    def _act_establish_trade_route(self, s: Settlement) -> bool:
+        before = len(self.active_routes())
+        self._auto_trade_rule()
+        return len(self.active_routes()) > before
+
+    def execute_action(self, settlement: Settlement, action_id: int) -> bool:
+        """Apply an agent decision. Unwired actions are validated no-ops."""
+        try:
+            action = Action(action_id)
+        except ValueError:
+            return False
+        method_name = WIRED_ACTIONS.get(action)
+        if method_name is None:
+            return False
+        method = getattr(self, f"_act_{method_name}", None)
+        if method is None:
+            # Named in WIRED_ACTIONS but no handler yet — treat as no-op.
+            return False
+        return bool(method(settlement))
 
     # ------------------------------------------------------------------
     # Tick loop
@@ -857,13 +936,25 @@ class Simulation:
         for idx, settlement in enumerate(self.settlements):
             if not settlement.is_alive:
                 continue
+            # --- Agent decision cycle (Sprint 7) -----------------------
+            agent = self.agents[idx] if idx < len(self.agents) else None
+            if agent is not None:
+                obs_now = agent.observe(self, settlement)
+                self._finalize_transition(settlement, obs_now)
+                action_id = agent.decide(obs_now)
+                self.execute_action(settlement, action_id)
+                self.action_counts[action_id] = (
+                    self.action_counts.get(action_id, 0) + 1
+                )
+                self._pending_transitions[settlement.id] = (
+                    obs_now,
+                    action_id,
+                    settlement.population,
+                    sum(self.buildings_of(settlement).values()),
+                )
             # Scarcity (any negative inventory) halves construction rate.
             if not settlement.is_in_scarcity or self.tick % 2 == 0:
                 self._process_build_queue(settlement)
-            if self.tick % BUILD_INTERVAL_TICKS == 0:
-                self._auto_build_rule(settlement)
-            if self.tick % ROAD_INTERVAL_TICKS == 0:
-                self._auto_road_rule(settlement)
             self._produce_resources(settlement)
             income = self.food_income(settlement) * self._drought_multiplier(
                 settlement
@@ -905,21 +996,49 @@ class Simulation:
                         continue
             else:
                 settlement.negative_inventory_progress = 0
-            if (
-                settlement.is_alive
-                and settlement.net_food_rate > CLAIM_FOOD_SURPLUS_THRESHOLD
-                and self.tick % CLAIM_INTERVAL_TICKS == 0
-            ):
-                self.claim_territory(settlement)
-        # Trade: establish new routes periodically, transfer every tick.
-        if self.tick % TRADE_INTERVAL_TICKS == 0:
-            self._auto_trade_rule()
+        # Trade: transfer every tick (route establishment is agent-driven).
         for route in self.trade_routes:
             if route.active:
                 self._trade_tick(route)
         # Ruins may spontaneously re-settle.
         for ruin in list(self.ruins):
             self._try_resettle_ruin(ruin)
+
+    def _finalize_transition(
+        self, settlement: Settlement, next_obs: np.ndarray
+    ) -> None:
+        """Close out the previous tick's (obs, action) with a reward."""
+        pending = self._pending_transitions.pop(settlement.id, None)
+        if pending is None:
+            return
+        prev_obs, prev_action, prev_pop, prev_buildings = pending
+        buildings_now = sum(self.buildings_of(settlement).values())
+        reward = placeholder_reward(
+            prev_pop,
+            settlement.population,
+            prev_buildings,
+            buildings_now,
+            starving=settlement.food_stock <= 0,
+        )
+        self.experience_buffer.append(
+            (
+                settlement.id,
+                self.tick - 1,
+                np.asarray(prev_obs, dtype=np.float32).tobytes(),
+                int(prev_action),
+                float(reward),
+                np.asarray(next_obs, dtype=np.float32).tobytes(),
+                False,
+            )
+        )
+
+    def flush_experiences(self, store) -> int:
+        """Write buffered experiences to SQLite and clear the buffer."""
+        if not self.experience_buffer:
+            return 0
+        count = store.insert_agent_experiences(self.experience_buffer)
+        self.experience_buffer.clear()
+        return count
 
     def run(self, ticks: int) -> None:
         for _ in range(ticks):
@@ -960,11 +1079,18 @@ def simulation_from_state(
     ruins: list[RuinSite],
     disaster_events: list[DisasterEvent],
 ) -> Simulation:
-    """Rebuild a Simulation from deserialized snapshot state (Sprint 6)."""
-    return Simulation(
+    """Rebuild a Simulation from deserialized snapshot state (Sprint 6).
+
+    Agents are stateless functions of (seed, tick), so fresh instances
+    resume seamlessly without serializing internals."""
+    sim = Simulation(
         world=world,
         settlements=settlements,
         trade_routes=trade_routes,
         disaster_events=disaster_events,
         ruins=ruins,
     )
+    sim.agents = [
+        RuleBasedAgent(world.seed, idx) for idx in range(len(settlements))
+    ]
+    return sim

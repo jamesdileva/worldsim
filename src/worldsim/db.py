@@ -80,6 +80,18 @@ CREATE TABLE IF NOT EXISTS god_events (
     before_state JSON,
     after_state JSON
 );
+
+-- Agent experience log (Sprint 7): one row per settlement per tick.
+CREATE TABLE IF NOT EXISTS agent_history (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    settlement_id TEXT NOT NULL,
+    tick INTEGER NOT NULL,
+    observation BLOB NOT NULL,
+    action INTEGER NOT NULL,
+    reward REAL NOT NULL,
+    next_observation BLOB NOT NULL,
+    done BOOLEAN NOT NULL DEFAULT 0
+);
 """
 
 
@@ -461,6 +473,26 @@ class WorldStore:
                     ),
                 ),
             )
+
+    def insert_agent_experiences(self, rows: list[tuple]) -> int:
+        """Batch-insert (settlement_id, tick, obs, action, reward, next_obs,
+        done) tuples. Callers buffer in RAM and flush periodically."""
+        if not rows:
+            return 0
+        with self._conn:
+            self._conn.executemany(
+                "INSERT INTO agent_history "
+                "(settlement_id, tick, observation, action, reward, "
+                "next_observation, done) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                rows,
+            )
+        return len(rows)
+
+    def agent_history_count(self) -> int:
+        row = self._conn.execute(
+            "SELECT COUNT(*) FROM agent_history"
+        ).fetchone()
+        return int(row[0])
 
     def log_god_event(
         self,

@@ -5,6 +5,97 @@ Decisions worth remembering are marked **[DECISION]**.
 
 ---
 
+## Session 7 — 2026-08-20 — Sprint 7: Agent Abstraction & Observation/Action Space
+
+**Scope:** Phase 2 / Sprint 7 — 60-action space, 60-dim observations,
+rule-based agent replacing the auto-rules, experience logging to
+`agent_history`, `docs/agent_spec.md` as the frozen RL contract.
+
+### What was built
+
+- `actions.py` — `Action` IntEnum with all **60 IDs** in §5.2 category order;
+  `WIRED_ACTIONS` registry (11 wired today); unwired IDs are validated no-ops
+- `agents.py` — `Agent` ABC (`observe`/`decide`), `observe_vector()` producing
+  the 60-dim normalized float32 vector (~31 real features, rest reserved 0.0),
+  `RuleBasedAgent` encoding the Sprint 2–4 heuristics, `placeholder_reward()`
+- `simulation.py` — `execute_action()` dispatch; per-tick agent cycle
+  (observe → decide → execute → transition buffered); auto-build/auto-road/
+  auto-trade/claim rules **removed from the loop** (logic survives as policy
+  helpers `_auto_road_rule`/`_auto_trade_rule` and mechanics); agents created
+  per settlement at spawn/resettle
+- `db.py` — `agent_history` table + batched `insert_agent_experiences`;
+  CLI flushes the RAM buffer every 500 ticks and at final save
+- CLI — `--agent rulebased`, end-of-run action distribution report
+- `docs/agent_spec.md` — full observation/action tables (the RL contract)
+- Tests: 134 passing (22 new)
+
+### Decisions
+
+- **[DECISION] Full 60-action space defined now**, unwired actions = no-ops.
+  The RL contract never changes shape — renumbering later would invalidate
+  trained policies.
+- **[DECISION] Agents fully replace auto-rules in the loop.** Mechanics
+  unchanged; only the decision path moved. This is the swap point where the
+  RL policy plugs in at Sprint 12.
+- **[DECISION] Placeholder reward:** 0.1·Δpop + 0.05·Δbuildings − 0.1·starving
+  + 0.001 survival, clamped [−1,1]. Formal reward is Sprint 13.
+- **[DECISION] Experiences buffered in RAM, flushed every 500 ticks** — per
+  architecture_notes.md's "don't murder the SQLite write bus".
+- **[DECISION] Rule-based agent made near-stateless**: epsilon/farm rolls are
+  keyed by `(seed, tick)` via fresh `random.Random` instances, and the cadence
+  counter syncs from the world clock on every `observe()`. Consequence: saved/
+  resumed simulations continue identically **without serializing agent
+  internals** — a property the RL pipeline will want too.
+- **[DECISION] Cadence branches ordered BEFORE income branches** in the
+  policy so an unbuildable sawmill can never block territorial expansion.
+
+### Gotchas / bugs found & fixed (the policy debugging saga)
+
+Three real deadlocks found by tests/debug runs while porting heuristics into
+decide-per-tick form:
+1. **Granary spam starvation** — policy chose BUILD_GRANARY every tick without
+   affordability checks until stone ran out, then nothing could ever be built
+   again → total collapse by tick ~1250. Fix: affordability gates on every
+   build branch (mirroring the old `can_afford` checks).
+2. **Normalized-unit confusion** — `farms < 40` on a /50-normalized dim means
+   2000 farms. All count thresholds converted to normalized units
+   (`granaries < 0.4` == 20 granaries).
+3. **Sawmill blocking expansion** — an unbuildable sawmill choice (no forest
+   tile) fired every tick and preempted the claim cadence forever. Fix:
+   cadences before income branches + sub-cadence (%8) gating on builds.
+Plus: resumed sims had **no agents at all** (`simulation_from_state` didn't
+create them) — caught by the step-continuation determinism test.
+
+### Known issues / deferred
+
+- Rule-based agent still wastes some decisions on failing builds (e.g.,
+  sawmills before forest is in range); bounded by sub-cadence gating. A
+  proper fix is remembering site availability — deferred to the RL agent,
+  which learns this.
+- Observation building calls `buildings_of`/`territory_of` several times per
+  settlement per tick (full-grid masks). Fine now; profile before Sprint 12's
+  parallel training.
+- `EMERGENCY_RESPONSE` remains a no-op effect (used as a policy signal only).
+- Benchmark outcomes shifted vs Sprints 2–6 (expected — decisions are now
+  per-tick agent choices, not interval timers).
+
+### Acceptance criteria status
+
+- ✅ Loop calls `agent.observe(world)` and `agent.decide(obs)` each tick
+- ✅ Observation vector: 60 normalized floats in [0,1], shape frozen
+- ✅ Action IDs map to concrete behaviors (Action 0 = Build Farm on best tile…)
+- ✅ Rule-based agent: food deficit → builds farm (unit-tested)
+- ✅ All experiences (obs, action, reward, next_obs) logged to SQLite
+- ✅ Agent abstraction swappable (AlwaysWait test agent behind same interface)
+
+### Next up (Sprint 8)
+
+Rule-based baseline competence: decision-tree priorities, urgency ordering,
+scouting/high-yield tile claiming, personality vectors biasing thresholds,
+benchmark-world performance metrics (survival time, population peak).
+
+---
+
 ## Session 6 — 2026-08-20 — Sprint 6: Persistence, Save/Load & Simulation Clock (Milestone 1!)
 
 **Scope:** Phase 1 / Sprint 6 — formal clock, save/load by world id, step

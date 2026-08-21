@@ -148,11 +148,11 @@ def test_food_income_from_owned_tiles():
     assert income == expected
 
 
-def test_auto_claim_on_surplus():
+def test_agent_claims_territory_on_surplus():
+    """Sprint 7: claiming moved from auto-rule into the rule-based agent."""
     sim, s = make_sim(seed=11)
     start_size = len(sim.territory_of(s))
-    # Run enough ticks with surplus to trigger the periodic auto-claim.
-    for _ in range(CLAIM_INTERVAL_TICKS * 2):
+    for _ in range(200):
         sim.step()
         if not s.is_alive:
             break

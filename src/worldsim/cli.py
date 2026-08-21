@@ -6,6 +6,7 @@ import argparse
 import sys
 import uuid
 
+from .actions import Action, action_category
 from .clock import describe
 from .db import DEFAULT_DB_PATH, WorldStore
 from .simulation import (
@@ -56,6 +57,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     sim.add_argument(
         "--world-id", default=None, help="Use a specific world id for saves"
+    )
+    sim.add_argument(
+        "--agent",
+        default="rulebased",
+        choices=["rulebased"],
+        help="Agent type driving settlements (default rulebased)",
     )
     sim.add_argument(
         "--size", type=int, default=DEFAULT_SIZE, help="Grid size (default 256)"
@@ -182,9 +189,13 @@ def cmd_simulate(args: argparse.Namespace) -> int:
         )
     any_alive = True
     store = None if args.no_save else WorldStore(args.db)
+    last_flush = 0
     try:
         for _ in range(args.ticks):
             sim.step()
+            if store is not None and sim.tick - last_flush >= 500:
+                sim.flush_experiences(store)
+                last_flush = sim.tick
             if (
                 store is not None
                 and args.save_interval > 0
@@ -209,11 +220,21 @@ def cmd_simulate(args: argparse.Namespace) -> int:
                     print("All settlements have collapsed.")
                     break
         if store is not None:
+            sim.flush_experiences(store)
             wid = _autosave(store, args, sim, args.world_id)
             print(f"\nSaved to {args.db} (world_id={wid})")
     finally:
         if store is not None:
             store.close()
+
+    if sim.action_counts:
+        print("\nAgent action distribution:")
+        named = sorted(
+            ((Action(k), v) for k, v in sim.action_counts.items()),
+            key=lambda kv: -kv[1],
+        )
+        for action, count in named[:10]:
+            print(f"  {action.name:<24} {count:>6}  ({action_category(action)})")
     return 0
 
 
