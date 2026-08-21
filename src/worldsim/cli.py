@@ -4,9 +4,15 @@ from __future__ import annotations
 
 import argparse
 import sys
+import uuid
 
+from .clock import describe
 from .db import DEFAULT_DB_PATH, WorldStore
-from .simulation import DEFAULT_SETTLEMENT_COUNT, Simulation
+from .simulation import (
+    DEFAULT_SETTLEMENT_COUNT,
+    Simulation,
+    simulation_from_state,
+)
 from .tiles import TerrainType
 from .world import DEFAULT_SIZE, World
 
@@ -29,11 +35,7 @@ def build_parser() -> argparse.ArgumentParser:
     gen.add_argument(
         "--no-save", action="store_true", help="Do not persist the generated world"
     )
-    _add_simulate_args(sub)
-    return parser
 
-
-def _add_simulate_args(sub) -> None:
     sim = sub.add_parser("simulate", help="Run a headless simulation")
     sim.add_argument("--seed", type=int, required=True, help="World seed")
     sim.add_argument("--ticks", type=int, default=1000, help="Ticks to run")
@@ -47,6 +49,15 @@ def _add_simulate_args(sub) -> None:
         "--report-interval", type=int, default=100, help="Ticks between status lines"
     )
     sim.add_argument(
+        "--save-interval",
+        type=int,
+        default=500,
+        help="Auto-save every N ticks (0 disables; default 500)",
+    )
+    sim.add_argument(
+        "--world-id", default=None, help="Use a specific world id for saves"
+    )
+    sim.add_argument(
         "--size", type=int, default=DEFAULT_SIZE, help="Grid size (default 256)"
     )
     sim.add_argument(
@@ -55,6 +66,63 @@ def _add_simulate_args(sub) -> None:
     sim.add_argument(
         "--no-save", action="store_true", help="Do not persist the final state"
     )
+
+    save = sub.add_parser(
+        "save", help="Deterministically re-run a seed and store it under an id"
+    )
+    save.add_argument("--seed", type=int, required=True, help="World seed")
+    save.add_argument("--ticks", type=int, default=0, help="Ticks to advance")
+    save.add_argument("--world-id", required=True, help="Id to store the world under")
+    save.add_argument(
+        "--settlements",
+        type=int,
+        default=DEFAULT_SETTLEMENT_COUNT,
+        help="Number of settlements to spawn",
+    )
+    save.add_argument(
+        "--size", type=int, default=DEFAULT_SIZE, help="Grid size (default 256)"
+    )
+    save.add_argument(
+        "--db", default=str(DEFAULT_DB_PATH), help="SQLite database path"
+    )
+
+    load = sub.add_parser("load", help="Restore a saved world and print its state")
+    load.add_argument("--world-id", required=True, help="World id to restore")
+    load.add_argument(
+        "--db", default=str(DEFAULT_DB_PATH), help="SQLite database path"
+    )
+
+    step = sub.add_parser("step", help="Advance a saved world by N ticks")
+    step.add_argument("--world-id", required=True, help="World id to advance")
+    step.add_argument("--ticks", type=int, default=1, help="Ticks to advance")
+    step.add_argument(
+        "--db", default=str(DEFAULT_DB_PATH), help="SQLite database path"
+    )
+
+    god = sub.add_parser("god", help="Apply a God Mode intervention")
+    god.add_argument("--world-id", required=True, help="World id to intervene in")
+    god.add_argument(
+        "--action",
+        required=True,
+        choices=["smite", "bless_food", "bless_wood", "bless_stone", "destroy"],
+        help="Intervention to apply",
+    )
+    god.add_argument(
+        "--settlement-index", type=int, default=0, help="Target settlement index"
+    )
+    god.add_argument("--amount", type=int, default=5, help="Magnitude of intervention")
+    god.add_argument("--x", type=int, default=None, help="Tile x (destroy action)")
+    god.add_argument("--y", type=int, default=None, help="Tile y (destroy action)")
+    god.add_argument(
+        "--db", default=str(DEFAULT_DB_PATH), help="SQLite database path"
+    )
+
+    events = sub.add_parser("events", help="List God Mode events for a world")
+    events.add_argument("--world-id", required=True)
+    events.add_argument(
+        "--db", default=str(DEFAULT_DB_PATH), help="SQLite database path"
+    )
+    return parser
 
 
 def cmd_generate(args: argparse.Namespace) -> int:
@@ -86,6 +154,19 @@ def cmd_generate(args: argparse.Namespace) -> int:
     return 0
 
 
+def _autosave(store: WorldStore, args, sim: Simulation, world_id: str | None) -> str:
+    """Persist current state under the given id (or a fresh one)."""
+    state = dict(
+        settlements=sim.settlements,
+        trade_routes=sim.trade_routes,
+        ruins=sim.ruins,
+        disaster_events=sim.disaster_events,
+    )
+    return store.save_world_with_id(
+        world_id if world_id is not None else str(uuid.uuid4()), sim.world, **state
+    )
+
+
 def cmd_simulate(args: argparse.Namespace) -> int:
     world = World(seed=args.seed, size=args.size)
     sim = Simulation(world)
@@ -100,40 +181,201 @@ def cmd_simulate(args: argparse.Namespace) -> int:
             f"  '{s.name}' at {s.spawn_x},{s.spawn_y}"
         )
     any_alive = True
-    for _ in range(args.ticks):
-        sim.step()
-        if sim.tick % args.report_interval == 0 or not any_alive:
-            print()
-            for s in settlements:
-                print(f"  [{s.name}] {sim.status_line(s)}")
-            routes = sim.active_routes()
-            if routes:
-                total = sum(r.transfers for r in routes)
-                print(f"  trade: {len(routes)} active routes, {total} units moved")
-            any_alive = any(s.is_alive for s in settlements)
-            if not any_alive:
-                print("All settlements have collapsed.")
-                break
-
-    if not args.no_save:
-        store = WorldStore(args.db)
-        try:
-            world_id = store.save_world(
-                world,
-                sim.settlements,
-                trade_routes=sim.trade_routes,
-                ruins=sim.ruins,
-                disaster_events=sim.disaster_events,
-            )
-        finally:
+    store = None if args.no_save else WorldStore(args.db)
+    try:
+        for _ in range(args.ticks):
+            sim.step()
+            if (
+                store is not None
+                and args.save_interval > 0
+                and sim.tick % args.save_interval == 0
+            ):
+                wid = _autosave(store, args, sim, args.world_id)
+                print(f"[auto-save] tick {sim.tick} -> {wid}")
+            if sim.tick % args.report_interval == 0 or not any_alive:
+                print()
+                for s in settlements:
+                    print(f"  [{s.name}] {sim.status_line(s)}")
+                routes = sim.active_routes()
+                if routes:
+                    total = sum(r.transfers for r in routes)
+                    print(
+                        f"  trade: {len(routes)} active routes, "
+                        f"{total} units moved"
+                    )
+                print(f"  clock: {describe(sim.tick)}")
+                any_alive = any(s.is_alive for s in settlements)
+                if not any_alive:
+                    print("All settlements have collapsed.")
+                    break
+        if store is not None:
+            wid = _autosave(store, args, sim, args.world_id)
+            print(f"\nSaved to {args.db} (world_id={wid})")
+    finally:
+        if store is not None:
             store.close()
-        print(f"\nSaved to {args.db} (world_id={world_id})")
+    return 0
+
+
+def cmd_save(args: argparse.Namespace) -> int:
+    """Deterministically re-run a seed and persist under a fixed id."""
+    world = World(seed=args.seed, size=args.size)
+    sim = Simulation(world)
+    sim.spawn_settlements(count=args.settlements)
+    sim.run(args.ticks)
+    store = WorldStore(args.db)
+    try:
+        store.save_world_with_id(
+            args.world_id,
+            sim.world,
+            sim.settlements,
+            trade_routes=sim.trade_routes,
+            ruins=sim.ruins,
+            disaster_events=sim.disaster_events,
+        )
+    finally:
+        store.close()
+    print(f"Saved world {args.world_id} (seed={args.seed}, tick={sim.tick})")
+    return 0
+
+
+def cmd_load(args: argparse.Namespace) -> int:
+    store = WorldStore(args.db)
+    try:
+        world, settlements, routes, ruins, disasters = (
+            store.load_latest_snapshot(args.world_id)
+        )
+    finally:
+        store.close()
+    alive = [s for s in settlements if s.is_alive]
+    print(f"Loaded world {args.world_id}: {describe(world.tick)}")
+    print(f"  settlements: {len(alive)} alive / {len(settlements)} ever")
+    for s in settlements:
+        status = f"pop {s.population}" if s.is_alive else "DEAD"
+        print(f"    [{s.name}] {status}")
+    print(f"  trade routes: {sum(1 for r in routes if r.active)} active")
+    print(f"  ruins: {len(ruins)}, disasters recorded: {len(disasters)}")
+    breakdown = world.terrain_breakdown()
+    print(
+        "  terrain: "
+        + ", ".join(f"{tt.name}={breakdown[tt]}" for tt in TerrainType)
+    )
+    return 0
+
+
+def cmd_step(args: argparse.Namespace) -> int:
+    store = WorldStore(args.db)
+    try:
+        world, settlements, routes, ruins, disasters = (
+            store.load_latest_snapshot(args.world_id)
+        )
+        sim = simulation_from_state(
+            world, settlements, routes, ruins, disasters
+        )
+        before_tick = sim.tick
+        sim.run(args.ticks)
+        store.update_world(
+            args.world_id,
+            sim.world,
+            sim.settlements,
+            trade_routes=sim.trade_routes,
+            ruins=sim.ruins,
+            disaster_events=sim.disaster_events,
+        )
+    finally:
+        store.close()
+    print(
+        f"Stepped world {args.world_id} from tick {before_tick} "
+        f"to {sim.tick} ({describe(sim.tick)})"
+    )
+    for s in sim.settlements:
+        print(f"  [{s.name}] {sim.status_line(s)}")
+    return 0
+
+
+def cmd_god(args: argparse.Namespace) -> int:
+    store = WorldStore(args.db)
+    try:
+        world, settlements, routes, ruins, disasters = (
+            store.load_latest_snapshot(args.world_id)
+        )
+        sim = simulation_from_state(
+            world, settlements, routes, ruins, disasters
+        )
+        target = None
+        before: dict | None = None
+        after: dict | None = None
+        if args.action == "destroy":
+            if args.x is None or args.y is None:
+                print("destroy requires --x and --y", file=sys.stderr)
+                return 2
+            before, after = sim.god_destroy_improvement(args.x, args.y)
+            target = f"tile({args.x},{args.y})"
+        else:
+            if not (0 <= args.settlement_index < len(sim.settlements)):
+                print("invalid --settlement-index", file=sys.stderr)
+                return 2
+            target = sim.settlements[args.settlement_index].name
+            if args.action == "smite":
+                before, after = sim.god_smite(
+                    sim.settlements[args.settlement_index], args.amount
+                )
+            elif args.action == "bless_food":
+                before, after = sim.god_bless_resources(
+                    sim.settlements[args.settlement_index], "food", args.amount
+                )
+            elif args.action == "bless_wood":
+                before, after = sim.god_bless_resources(
+                    sim.settlements[args.settlement_index], "wood", args.amount
+                )
+            elif args.action == "bless_stone":
+                before, after = sim.god_bless_resources(
+                    sim.settlements[args.settlement_index], "stone", args.amount
+                )
+        store.log_god_event(
+            args.world_id, sim.tick, args.action, target, before, after
+        )
+        store.update_world(
+            args.world_id,
+            sim.world,
+            sim.settlements,
+            trade_routes=sim.trade_routes,
+            ruins=sim.ruins,
+            disaster_events=sim.disaster_events,
+        )
+    finally:
+        store.close()
+    print(f"God event '{args.action}' applied at {describe(sim.tick)}")
+    print(f"  target: {target}")
+    print(f"  before: {before}")
+    print(f"  after:  {after}")
+    return 0
+
+
+def cmd_events(args: argparse.Namespace) -> int:
+    store = WorldStore(args.db)
+    try:
+        events = store.get_god_events(args.world_id)
+    finally:
+        store.close()
+    print(f"God events for {args.world_id}: {len(events)}")
+    for e in events:
+        print(f"  tick {e['tick']:>6} | {e['action_type']:<12} | {e['target']}")
+        print(f"    {e['before_state']} -> {e['after_state']}")
     return 0
 
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
-    handlers = {"generate": cmd_generate, "simulate": cmd_simulate}
+    handlers = {
+        "generate": cmd_generate,
+        "simulate": cmd_simulate,
+        "save": cmd_save,
+        "load": cmd_load,
+        "step": cmd_step,
+        "god": cmd_god,
+        "events": cmd_events,
+    }
     return handlers[args.command](args)
 
 

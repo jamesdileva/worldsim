@@ -69,6 +69,17 @@ CREATE TABLE IF NOT EXISTS trade_routes (
     transfers INTEGER NOT NULL DEFAULT 0,
     active INTEGER NOT NULL DEFAULT 1
 );
+
+-- God Mode interventions with before/after state (Sprint 6).
+CREATE TABLE IF NOT EXISTS god_events (
+    id TEXT PRIMARY KEY,
+    world_id TEXT NOT NULL,
+    tick INTEGER NOT NULL,
+    action_type TEXT NOT NULL,
+    target TEXT,
+    before_state JSON,
+    after_state JSON
+);
 """
 
 
@@ -82,7 +93,8 @@ def _encode_array(arr: np.ndarray) -> dict:
 
 def _decode_array(obj: dict) -> np.ndarray:
     raw = zlib.decompress(base64.b64decode(obj["data"]))
-    return np.frombuffer(raw, dtype=np.dtype(obj["dtype"])).reshape(obj["shape"])
+    # copy() makes the array writable (frombuffer returns a read-only view).
+    return np.frombuffer(raw, dtype=np.dtype(obj["dtype"])).reshape(obj["shape"]).copy()
 
 
 def _encode_settlement(s: Settlement) -> dict:
@@ -347,3 +359,154 @@ class WorldStore:
         if row is None:
             raise ValueError(f"No snapshot found for world {world_id}")
         return deserialize_world(row[0])
+
+    def world_exists(self, world_id: str) -> bool:
+        row = self._conn.execute(
+            "SELECT 1 FROM worlds WHERE id = ?", (world_id,)
+        ).fetchone()
+        return row is not None
+
+    def save_world_with_id(
+        self,
+        world_id: str,
+        world: World,
+        settlements: list[Settlement] | None = None,
+        trade_routes: list[TradeRoute] | None = None,
+        ruins: list[RuinSite] | None = None,
+        disaster_events: list[DisasterEvent] | None = None,
+    ) -> str:
+        """Save under a caller-chosen id (upsert)."""
+        if self.world_exists(world_id):
+            self.update_world(
+                world_id, world, settlements, trade_routes, ruins, disaster_events
+            )
+            return world_id
+        created_at = datetime.now(timezone.utc).isoformat()
+        with self._conn:
+            self._conn.execute(
+                "INSERT INTO worlds (id, seed, created_at, last_tick) VALUES (?, ?, ?, ?)",
+                (world_id, world.seed, created_at, world.tick),
+            )
+            self._conn.execute(
+                "INSERT INTO snapshots (tick, world_id, state_json) VALUES (?, ?, ?)",
+                (
+                    world.tick,
+                    world_id,
+                    serialize_world(world, settlements, trade_routes, ruins, disaster_events),
+                ),
+            )
+            for s in settlements or []:
+                self._conn.execute(
+                    "INSERT INTO settlements "
+                    "(id, name, world_id, spawn_x, spawn_y, created_at_tick, destroyed_at_tick) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    (
+                        s.id,
+                        s.name,
+                        world_id,
+                        s.spawn_x,
+                        s.spawn_y,
+                        s.created_at_tick,
+                        s.destroyed_at_tick,
+                    ),
+                )
+                inv = s.resource_inventory
+                self._conn.execute(
+                    "INSERT INTO resources "
+                    "(settlement_id, tick, food, wood, stone, metal) "
+                    "VALUES (?, ?, ?, ?, ?, ?)",
+                    (
+                        s.id,
+                        world.tick,
+                        s.food_stock,
+                        inv.get("wood", 0.0),
+                        inv.get("stone", 0.0),
+                        inv.get("metal", 0.0),
+                    ),
+                )
+            for r in trade_routes or []:
+                self._conn.execute(
+                    "INSERT OR REPLACE INTO trade_routes "
+                    "(id, source_id, dest_id, established_tick, transfers, active) "
+                    "VALUES (?, ?, ?, ?, ?, ?)",
+                    (r.id, r.source_id, r.dest_id, r.established_tick, r.transfers, int(r.active)),
+                )
+        return world_id
+
+    def update_world(
+        self,
+        world_id: str,
+        world: World,
+        settlements: list[Settlement] | None = None,
+        trade_routes: list[TradeRoute] | None = None,
+        ruins: list[RuinSite] | None = None,
+        disaster_events: list[DisasterEvent] | None = None,
+    ) -> None:
+        """Write a new snapshot for an existing world and bump last_tick."""
+        if not self.world_exists(world_id):
+            raise ValueError(f"Unknown world {world_id}")
+        with self._conn:
+            self._conn.execute(
+                "UPDATE worlds SET last_tick = ? WHERE id = ?",
+                (world.tick, world_id),
+            )
+            self._conn.execute(
+                "INSERT OR REPLACE INTO snapshots (tick, world_id, state_json) "
+                "VALUES (?, ?, ?)",
+                (
+                    world.tick,
+                    world_id,
+                    serialize_world(
+                        world, settlements, trade_routes, ruins, disaster_events
+                    ),
+                ),
+            )
+
+    def log_god_event(
+        self,
+        world_id: str,
+        tick: int,
+        action_type: str,
+        target: str | None,
+        before_state: dict | None,
+        after_state: dict | None,
+    ) -> str:
+        event_id = str(uuid.uuid4())
+        with self._conn:
+            self._conn.execute(
+                "INSERT INTO god_events "
+                "(id, world_id, tick, action_type, target, before_state, after_state) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (
+                    event_id,
+                    world_id,
+                    tick,
+                    action_type,
+                    target,
+                    json.dumps(before_state, sort_keys=True)
+                    if before_state is not None
+                    else None,
+                    json.dumps(after_state, sort_keys=True)
+                    if after_state is not None
+                    else None,
+                ),
+            )
+        return event_id
+
+    def get_god_events(self, world_id: str) -> list[dict]:
+        rows = self._conn.execute(
+            "SELECT id, tick, action_type, target, before_state, after_state "
+            "FROM god_events WHERE world_id = ? ORDER BY tick",
+            (world_id,),
+        ).fetchall()
+        return [
+            {
+                "id": r[0],
+                "tick": r[1],
+                "action_type": r[2],
+                "target": r[3],
+                "before_state": json.loads(r[4]) if r[4] else None,
+                "after_state": json.loads(r[5]) if r[5] else None,
+            }
+            for r in rows
+        ]

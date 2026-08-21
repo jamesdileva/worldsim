@@ -5,6 +5,84 @@ Decisions worth remembering are marked **[DECISION]**.
 
 ---
 
+## Session 6 — 2026-08-20 — Sprint 6: Persistence, Save/Load & Simulation Clock (Milestone 1!)
+
+**Scope:** Phase 1 / Sprint 6 — formal clock, save/load by world id, step
+control, auto-save, God Mode action logging. **Completes Phase 1 and
+Milestone 1 (Living Ant Farm).**
+
+### What was built
+
+- `clock.py` — 128 ticks/season, 512 ticks/year; `year_of`, `season_name`,
+  `describe(tick)`; disasters.py now imports clock constants (no duplication)
+- `db.py` — `god_events` table; `save_world_with_id()` (caller-chosen id,
+  upsert); `update_world()` (new snapshot + last_tick bump); `log_god_event()`
+  / `get_god_events()`; `_decode_array` now `.copy()`s (frombuffer views are
+  read-only)
+- `simulation.py` — God Mode actions (`god_smite`, `god_bless_resources`,
+  `god_destroy_improvement`) each returning before/after dicts;
+  `simulation_from_state()` factory to resume from a snapshot
+- CLI additions:
+  - `simulate --world-id X --save-interval N` (auto-save every N ticks)
+  - `save --seed S --ticks T --world-id X` (deterministic re-run → fixed id)
+  - `load --world-id X` (restore + state summary incl. clock)
+  - `step --world-id X --ticks N` (advance saved world; pause = don't step,
+    accelerate = bigger N)
+  - `god --world-id X --action {smite,bless_food,bless_wood,bless_stone,destroy}`
+  - `events --world-id X` (God event history with before/after)
+- Tests: 112 passing (15 new)
+
+### Decisions
+
+- **[DECISION] Time controls are headless for now:** pause = not stepping a
+  saved world, step = `step --ticks 1`, accelerate = larger N. Real-time
+  controls belong to the future UI layer.
+- **[DECISION] `save` regenerates deterministically from seed** rather than
+  requiring a live process — the sim is pure `(seed, tick)`, so save-by-id is
+  just re-run + upsert. This keeps the CLI stateless.
+- **[DECISION] Auto-save writes snapshot rows under one world id** (history
+  preserved per tick); final state always saved unless `--no-save`.
+- **[DECISION] God actions mutate through the same validated paths as the
+  sim** where possible (`destroy_building`), log before/after JSON to
+  `god_events`, then persist via `update_world`.
+- **[DECISION] Deserialized arrays are copied** on load so resumed sims can
+  write to them (np.frombuffer returns read-only views).
+
+### Gotchas / bugs found & fixed
+
+- Inserting module-level `simulation_from_state` mid-file silently ended the
+  class body, orphaning `status_line` as a bare function — caught by
+  AttributeError in CLI tests. Moved to end of file.
+- Read-only numpy arrays after load broke resumed sims (`assignment
+  destination is read-only`).
+- `_autosave` called `update_world` before the world row existed — switched
+  to `save_world_with_id` (upsert semantics).
+- argv values passed to `main([...])` must be strings even for int options.
+
+### Acceptance criteria status
+
+- ✅ `save --world-id abc123` writes full state to SQLite
+- ✅ `load --world-id abc123` restores exact state (verified vs fresh run)
+- ✅ Clock advances; season/year correct (1000 ticks = year 1, winter)
+- ✅ Pause freezes (saved state); step advances exactly 1 tick
+- ✅ God actions logged to `god_events` with before/after states
+- ✅ Auto-save: run 1000 ticks → snapshots at 500 and 1000
+
+### Milestone 1 reached
+
+Phase 1 deliverable per detailed_sprint_plan.md: seeded deterministic world,
+autonomous settlements that grow/trade/suffer disasters/collapse/recover,
+full save/load, God Mode interventions, all observable via CLI.
+
+### Next up
+
+Phase 2 (Sprint 7): agent abstraction — observation/action spaces, rule-based
+agent wired into the loop, experience logging. Also queued for discussion:
+Electron/UI shell timing (stack docs specify Electron+React+PixiJS but no
+sprint schedules it; visualization currently starts Phase 8).
+
+---
+
 ## Session 5 — 2026-08-20 — Sprint 5: Disasters, Death & Recovery
 
 **Scope:** Phase 1 / Sprint 5 — Drought/Fire/Plague, season-weighted regional

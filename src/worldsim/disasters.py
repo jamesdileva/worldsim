@@ -12,9 +12,7 @@ import random
 import uuid
 from dataclasses import dataclass, field
 
-# Minimal season counter; the full simulation clock arrives in Sprint 6.
-TICKS_PER_SEASON = 128
-SEASONS = ("spring", "summer", "autumn", "winter")
+from .clock import TICKS_PER_SEASON, SEASON_NAMES as SEASONS
 
 DISASTER_SEED_OFFSET = 3_000_000
 EVENT_CHECK_INTERVAL_TICKS = 50

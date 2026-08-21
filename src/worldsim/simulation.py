@@ -594,6 +594,42 @@ class Simulation:
         return [r for r in self.trade_routes if r.active]
 
     # ------------------------------------------------------------------
+    # God Mode (Sprint 6) — interventions return before/after state
+    # ------------------------------------------------------------------
+
+    def god_smite(self, settlement: Settlement, amount: int) -> tuple[dict, dict]:
+        """Kill `amount` population directly."""
+        before = {"population": settlement.population}
+        settlement.population = max(0, settlement.population - amount)
+        if not settlement.is_alive:
+            self._kill(settlement)
+        after = {"population": settlement.population}
+        return before, after
+
+    def god_bless_resources(
+        self, settlement: Settlement, resource: str, amount: float
+    ) -> tuple[dict, dict]:
+        """Grant resources (or food) to a settlement."""
+        if resource == "food":
+            before = {"food_stock": settlement.food_stock}
+            settlement.food_stock += amount
+            after = {"food_stock": settlement.food_stock}
+        else:
+            before = {resource: settlement.resource_inventory.get(resource, 0.0)}
+            settlement.resource_inventory[resource] = (
+                settlement.resource_inventory.get(resource, 0.0) + amount
+            )
+            after = {resource: settlement.resource_inventory[resource]}
+        return before, after
+
+    def god_destroy_improvement(self, x: int, y: int) -> tuple[dict, dict]:
+        """Remove any improvement from a tile."""
+        before = {"improvement": int(self.world.improvements[y, x])}
+        self.destroy_building(x, y)
+        after = {"improvement": int(self.world.improvements[y, x])}
+        return before, after
+
+    # ------------------------------------------------------------------
     # Disasters (Sprint 5)
     # ------------------------------------------------------------------
 
@@ -915,3 +951,20 @@ class Simulation:
             f"food {settlement.food_stock:>9.1f} | territory {territory:>4} | "
             f"bld {buildings:>3} | road {roads:>3} | route {routes} | {state}"
         )
+
+
+def simulation_from_state(
+    world: World,
+    settlements: list[Settlement],
+    trade_routes: list[TradeRoute],
+    ruins: list[RuinSite],
+    disaster_events: list[DisasterEvent],
+) -> Simulation:
+    """Rebuild a Simulation from deserialized snapshot state (Sprint 6)."""
+    return Simulation(
+        world=world,
+        settlements=settlements,
+        trade_routes=trade_routes,
+        disaster_events=disaster_events,
+        ruins=ruins,
+    )
