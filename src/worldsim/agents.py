@@ -13,7 +13,7 @@ import random
 
 import numpy as np
 
-from .actions import Action
+from .actions import Action, WIRED_ACTIONS
 from .buildings import BASE_FOOD_CAPACITY, BUILDING_SPECS, BuildingType
 from .disasters import DisasterType
 from .settlement import (
@@ -136,29 +136,39 @@ class Agent(abc.ABC):
 
 
 class RuleBasedAgent(Agent):
-    """Encodes the Sprint 2-4 heuristics as explicit decisions.
+    """Urgency-ordered rule-based baseline (Sprint 8).
 
-    Priority: famine response > food security > expansion/infrastructure/
-    trade (on interval cadences matching the old auto-rules) > idle.
+    Decision priority: famine > food security > expansion/infrastructure/
+    trade cadences > resource income > farm growth > idle.
 
-    Deliberately near-stateless: the epsilon/farm rolls are keyed by
-    (seed, tick) and the cadence counter syncs from the world clock on every
-    observe(), so a saved-and-resumed simulation continues identically
-    without serializing agent internals."""
+    Personality vectors (per settlement, Sprint 8) bias thresholds:
+    expansionism speeds claiming, industry favors sawmills/mines and keeps
+    deeper stockpiles, commerce speeds trade route establishment.
 
-    EPSILON = 0.02
+    Near-stateless: rolls are keyed by (seed, tick) and the cadence counter
+    syncs from the world clock on every observe(), so saved-and-resumed
+    simulations continue identically without serializing agent internals."""
+
+    EPSILON = 0.10  # spec: 10% chance of a random action
 
     def __init__(self, seed: int, settlement_index: int) -> None:
         self.seed = seed
         self.index = settlement_index
         self.call_count = 0
         self._tick: int | None = None
+        self._personality: dict[str, float] = {}
         self.last_action: int = int(Action.IDLE)
 
     def observe(self, sim, settlement: Settlement) -> np.ndarray:
         # Sync cadence counter from the world clock (resume-safe).
         self.call_count = sim.tick - settlement.created_at_tick
         self._tick = sim.tick
+        self._personality = dict(settlement.personality) or {
+            "expansionism": 0.5,
+            "industry": 0.5,
+            "commerce": 0.5,
+            "aggression": 0.5,
+        }
         return observe_vector(sim, settlement)
 
     def decide(self, obs: np.ndarray) -> int:
@@ -167,13 +177,34 @@ class RuleBasedAgent(Agent):
         self.last_action = action
         return action
 
+    def _epsilon_action(self, tick: int) -> int:
+        """10% uniform over wired actions (random no-ops teach nothing)."""
+        rng = random.Random(
+            (self.seed ^ 0xC0DE) + tick * 7919 + self.index * 131
+        )
+        if rng.random() >= self.EPSILON:
+            return -1
+        wired = sorted(int(a) for a in WIRED_ACTIONS)
+        return wired[rng.randrange(len(wired))]
+
     def _policy(self, obs: np.ndarray) -> int:
         tick = self._tick if self._tick is not None else self.call_count
-        eps_rng = random.Random(
-            (self.seed ^ 0xA6F1) + tick * 7919 + self.index * 131
-        )
-        if eps_rng.random() < self.EPSILON:
-            return int(Action.WAIT)
+        eps = self._epsilon_action(tick)
+        if eps != -1:
+            return eps
+
+        p = self._personality
+        expansionism = p.get("expansionism", 0.5)
+        industry = p.get("industry", 0.5)
+        commerce = p.get("commerce", 0.5)
+
+        # Personality-biased cadences.
+        claim_interval = max(8, int(CLAIM_INTERVAL_TICKS / (0.5 + expansionism)))
+        road_interval = max(6, int(ROAD_INTERVAL_TICKS / (0.5 + industry)))
+        trade_interval = max(8, int(TRADE_INTERVAL_TICKS / (0.5 + commerce)))
+        # Industrial settlements keep deeper stockpiles before switching to
+        # income buildings; commercial ones push trade earlier.
+        stockpile_floor = 0.05 + industry * 0.10
 
         food_level = float(obs[1])
         net_food = float(obs[2]) * 2.0 - 1.0  # back to [-1, 1]
@@ -189,48 +220,47 @@ class RuleBasedAgent(Agent):
         can_sawmill = wood >= 0.004 and stone >= 0.002
         can_mine = wood >= 0.006 and stone >= 0.004
         can_granary = wood >= 0.005 and stone >= 0.005
-        has_farm = farms >= 0.02  # at least one farm
+        # float32 obs values need tolerant comparisons (0.02 stored as
+        # 0.01999... would fail an exact >= check).
+        has_farm = farms >= 0.02 - 1e-6  # at least one farm
 
-        # Famine response: build food income if possible, otherwise secure
-        # building resources or land — never spin on an unaffordable action.
+        # --- Urgency 1: famine response ---------------------------------
         if food_level < 0.2 or net_food < -0.05:
             if farms < 0.8 and can_farm:
                 return int(Action.BUILD_FARM)
             if can_mine:
                 return int(Action.BUILD_MINE)
-            if self.call_count % CLAIM_INTERVAL_TICKS == 0:
+            if self.call_count % claim_interval == 0:
                 return int(Action.CLAIM_TERRITORY)
             return int(Action.WAIT)
 
-        # Food security: storage pressure -> granary (only if affordable).
+        # --- Urgency 2: food security ------------------------------------
         if food_level > 0.9 and granaries < 0.4 and can_granary:
             return int(Action.BUILD_GRANARY)
 
-        # Interval cadences come BEFORE income branches: an unbuildable
-        # sawmill must never block territorial expansion (which is what
-        # eventually brings forest/mountain tiles into reach).
-        if self.call_count % CLAIM_INTERVAL_TICKS == 0:
+        # --- Urgency 3: expansion / infrastructure / trade cadences ------
+        if self.call_count % claim_interval == 0:
             return int(Action.CLAIM_TERRITORY)
-        if self.call_count % ROAD_INTERVAL_TICKS == 4:
+        if self.call_count % road_interval == 4:
             return int(Action.EXPAND_ROAD_NETWORK)
-        if self.call_count % TRADE_INTERVAL_TICKS == 10:
+        if self.call_count % trade_interval == 10:
             return int(Action.ESTABLISH_TRADE_ROUTE)
 
-        # Resource income: keep sawmills/mines coming, on a sub-cadence so
-        # repeated failures can't dominate the decision stream.
-        if wood < 0.05 and has_farm and can_sawmill and self.call_count % 8 == 2:
+        # --- Urgency 4: resource income (sub-cadence gated) --------------
+        if wood < stockpile_floor and has_farm and can_sawmill and self.call_count % 8 == 2:
             return int(Action.BUILD_SAWMILL)
-        if stone < 0.05 and has_farm and can_mine and self.call_count % 8 == 6:
+        if stone < stockpile_floor and has_farm and can_mine and self.call_count % 8 == 6:
             return int(Action.BUILD_MINE)
 
-        # Otherwise light farm growth or idle.
+        # --- Urgency 5: steady-state farm growth -------------------------
         if farms < 0.6 and can_farm:
             farm_rng = random.Random(
                 (self.seed ^ 0xB7E2) + tick * 104729 + self.index * 17
             )
-            if farm_rng.random() < 0.3:
+            if farm_rng.random() < 0.3 * (1.25 - expansionism):
                 return int(Action.BUILD_FARM)
         return int(Action.WAIT)
+
 
 
 def placeholder_reward(

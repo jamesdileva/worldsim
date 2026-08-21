@@ -35,6 +35,7 @@ from .disasters import (
 )
 from .settlement import (
     LOW_HAPPINESS_COLLAPSE_TICKS,
+    assign_personality,
     Settlement,
 )
 from .tiles import TERRAIN_PROFILES, TerrainType
@@ -197,6 +198,10 @@ class Simulation:
     ) -> Settlement:
         """Append a settlement, align its agent slot, and claim 3x3."""
         settlement.ruin_origin = ruin_origin
+        if not settlement.personality:
+            settlement.personality = assign_personality(
+                self.world.seed, len(self.settlements)
+            )
         self.settlements.append(settlement)
         idx = len(self.settlements) - 1
         while len(self.agents) < idx:
@@ -326,8 +331,12 @@ class Simulation:
     def find_building_site(
         self, settlement: Settlement, building_type: BuildingType
     ) -> tuple[int, int] | None:
-        """Deterministically pick the first owned, unimproved tile with valid
-        terrain for the building type (row-major scan)."""
+        """Pick the highest-yield owned, unimproved, valid-terrain tile for
+        the building type (Sprint 8: agents seek high-yield tiles).
+
+        Scoring: farms maximize terrain food; sawmills prefer dense forest
+        neighborhoods; mines prefer mountain neighborhoods. Ties break
+        row-major (deterministic)."""
         spec = BUILDING_SPECS[building_type]
         valid_terrain = np.isin(
             self.world.terrain, [t.value for t in spec.valid_terrain]
@@ -342,7 +351,21 @@ class Simulation:
         sites = np.argwhere(candidates)
         if len(sites) == 0:
             return None
-        y, x = int(sites[0][0]), int(sites[0][1])
+        if building_type == BuildingType.FARM:
+            score_map = self.world.food_yield_grid().astype(np.float64)
+        else:
+            # Prefer tiles whose 3x3 neighborhood is richest in the
+            # required terrain (forest for sawmills, mountain for mines).
+            target = spec.valid_terrain[0].value
+            target_mask = (self.world.terrain == target).astype(np.int32)
+            kernel = np.ones((3, 3), dtype=np.int32)
+            density = self._convolve3x3(target_mask, kernel)
+            padded = np.zeros_like(self.world.terrain, dtype=np.float64)
+            padded[1:-1, 1:-1] = density
+            score_map = padded
+        scores = score_map[sites[:, 0], sites[:, 1]]
+        best = int(np.argmax(scores))  # first max wins -> row-major tie-break
+        y, x = int(sites[best][0]), int(sites[best][1])
         return y, x
 
     def build_at(

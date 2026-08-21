@@ -129,6 +129,31 @@ def build_parser() -> argparse.ArgumentParser:
     events.add_argument(
         "--db", default=str(DEFAULT_DB_PATH), help="SQLite database path"
     )
+
+    bench = sub.add_parser(
+        "benchmark", help="Run the rule-based agent on benchmark worlds"
+    )
+    bench.add_argument(
+        "--first-seed", type=int, default=50000, help="First benchmark seed"
+    )
+    bench.add_argument(
+        "--num-worlds", type=int, default=10, help="Number of benchmark worlds"
+    )
+    bench.add_argument(
+        "--ticks", type=int, default=5000, help="Ticks per world (default 5000)"
+    )
+    bench.add_argument(
+        "--settlements",
+        type=int,
+        default=DEFAULT_SETTLEMENT_COUNT,
+        help="Settlements per world",
+    )
+    bench.add_argument(
+        "--size", type=int, default=DEFAULT_SIZE, help="Grid size (default 256)"
+    )
+    bench.add_argument(
+        "--db", default=str(DEFAULT_DB_PATH), help="SQLite database path"
+    )
     return parser
 
 
@@ -386,6 +411,73 @@ def cmd_events(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_benchmark(args: argparse.Namespace) -> int:
+    """Run the rule-based baseline on benchmark worlds and log metrics."""
+    store = WorldStore(args.db)
+    try:
+        print(
+            f"Benchmarking {args.num_worlds} worlds "
+            f"(seeds {args.first_seed}+), {args.ticks} ticks each"
+        )
+        survivors_total = 0
+        worlds = 0
+        for i in range(args.num_worlds):
+            seed = args.first_seed + i
+            world = World(seed=seed, size=args.size)
+            sim = Simulation(world)
+            settlements = sim.spawn_settlements(count=args.settlements)
+            peak = 0
+            survival_ticks: list[int] = []
+            for tick in range(1, args.ticks + 1):
+                sim.step()
+                for s in settlements:
+                    if s.is_alive:
+                        peak = max(peak, s.population)
+                        survival_ticks.append(tick)
+                if not any(s.is_alive for s in settlements):
+                    break
+            alive = [s for s in settlements if s.is_alive]
+            survivors = len(alive)
+            survivors_total += 1 if survivors > 0 else 0
+            worlds += 1
+            inv = lambda s, r: sum(  # noqa: E731
+                x.resource_inventory.get(r, 0.0) for x in settlements
+            )
+            metrics = {
+                "seed": seed,
+                "agent_type": "rulebased",
+                "ticks_requested": args.ticks,
+                "settlements": len(settlements),
+                "survivors": survivors,
+                "peak_population": peak,
+                "final_population": sum(
+                    s.population for s in settlements
+                ),
+                "avg_survival_ticks": (
+                    sum(survival_ticks) / len(survival_ticks)
+                    if survival_ticks
+                    else 0.0
+                ),
+                "food_final": sum(s.food_stock for s in settlements),
+                "wood_final": inv(None, "wood"),
+                "stone_final": inv(None, "stone"),
+            }
+            store.insert_benchmark_run(metrics)
+            print(
+                f"  seed {seed}: survivors {survivors}/{len(settlements)}, "
+                f"peak pop {peak}, avg survival "
+                f"{metrics['avg_survival_ticks']:.0f} ticks"
+            )
+    finally:
+        store.close()
+    rate = 100.0 * survivors_total / max(worlds, 1)
+    print(
+        f"\nWorld survival rate (>=1 settlement alive): "
+        f"{survivors_total}/{worlds} ({rate:.0f}%)"
+    )
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     handlers = {
@@ -396,6 +488,7 @@ def main(argv: list[str] | None = None) -> int:
         "step": cmd_step,
         "god": cmd_god,
         "events": cmd_events,
+        "benchmark": cmd_benchmark,
     }
     return handlers[args.command](args)
 

@@ -92,6 +92,23 @@ CREATE TABLE IF NOT EXISTS agent_history (
     next_observation BLOB NOT NULL,
     done BOOLEAN NOT NULL DEFAULT 0
 );
+
+-- Baseline performance metrics per benchmark world (Sprint 8).
+CREATE TABLE IF NOT EXISTS benchmark_runs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    seed INTEGER NOT NULL,
+    agent_type TEXT NOT NULL,
+    ticks_requested INTEGER NOT NULL,
+    settlements INTEGER NOT NULL,
+    survivors INTEGER NOT NULL,
+    peak_population INTEGER NOT NULL,
+    final_population INTEGER NOT NULL,
+    avg_survival_ticks REAL NOT NULL,
+    food_final REAL NOT NULL,
+    wood_final REAL NOT NULL,
+    stone_final REAL NOT NULL,
+    created_at TEXT NOT NULL
+);
 """
 
 
@@ -124,6 +141,8 @@ def _encode_settlement(s: Settlement) -> dict:
         "starvation_progress": s.starvation_progress,
         "net_food_rate": s.net_food_rate,
         "build_queue": list(s.build_queue),
+        "personality": dict(s.personality),
+        "ruin_origin": s.ruin_origin,
     }
 
 
@@ -142,6 +161,8 @@ def _decode_settlement(obj: dict) -> Settlement:
         starvation_progress=obj["starvation_progress"],
         net_food_rate=obj["net_food_rate"],
         build_queue=list(obj.get("build_queue", [])),
+        personality=dict(obj.get("personality", {})),
+        ruin_origin=obj.get("ruin_origin"),
     )
 
 
@@ -493,6 +514,33 @@ class WorldStore:
             "SELECT COUNT(*) FROM agent_history"
         ).fetchone()
         return int(row[0])
+
+    def insert_benchmark_run(self, metrics: dict) -> int:
+        """Store one benchmark world's aggregated performance metrics."""
+        created_at = datetime.now(timezone.utc).isoformat()
+        with self._conn:
+            cur = self._conn.execute(
+                "INSERT INTO benchmark_runs "
+                "(seed, agent_type, ticks_requested, settlements, survivors, "
+                "peak_population, final_population, avg_survival_ticks, "
+                "food_final, wood_final, stone_final, created_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    metrics["seed"],
+                    metrics["agent_type"],
+                    metrics["ticks_requested"],
+                    metrics["settlements"],
+                    metrics["survivors"],
+                    metrics["peak_population"],
+                    metrics["final_population"],
+                    metrics["avg_survival_ticks"],
+                    metrics["food_final"],
+                    metrics["wood_final"],
+                    metrics["stone_final"],
+                    created_at,
+                ),
+            )
+        return int(cur.lastrowid)
 
     def log_god_event(
         self,

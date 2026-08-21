@@ -8,8 +8,24 @@ Growth/starvation rules from docs/detailed_sprint_plan.md Sprint 2:
 
 from __future__ import annotations
 
+import random
 import uuid
 from dataclasses import dataclass, field
+
+PERSONALITY_SEED_OFFSET = 5_000_000
+PERSONALITY_TRAITS = ("expansionism", "industry", "commerce", "aggression")
+
+
+def assign_personality(seed: int, settlement_index: int) -> dict[str, float]:
+    """Seeded personality vector in [0,1] per trait (Sprint 8).
+
+    Traits bias the rule-based agent's thresholds: expansionism speeds
+    claiming, industry favors sawmills/mines, commerce speeds trade,
+    aggression is reserved for Sprint 9+ military decisions."""
+    rng = random.Random(
+        (seed ^ PERSONALITY_SEED_OFFSET) + settlement_index * 7919
+    )
+    return {trait: round(rng.random(), 3) for trait in PERSONALITY_TRAITS}
 
 GROWTH_INTERVAL_TICKS = 24
 STARVATION_INTERVAL_TICKS = 48
@@ -56,6 +72,8 @@ class Settlement:
     low_happiness_progress: int = 0
     # Set when founded on/near ruins: id of the origin RuinSite (Sprint 5).
     ruin_origin: str | None = None
+    # Personality vector biasing agent decisions (Sprint 8): trait -> [0,1].
+    personality: dict[str, float] = field(default_factory=dict)
     # Food income minus consumption for the most recent tick (set by sim).
     net_food_rate: float = 0.0
 
