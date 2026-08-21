@@ -197,6 +197,7 @@ def _autosave(store: WorldStore, args, sim: Simulation, world_id: str | None) ->
         contested=sim.contested,
         building_debuffs=sim.building_debuffs,
         event_log=sim.event_log,
+        diplomacy=sim.diplomacy,
     )
     return store.save_world_with_id(
         world_id if world_id is not None else str(uuid.uuid4()), sim.world, **kwargs
@@ -287,6 +288,7 @@ def cmd_save(args: argparse.Namespace) -> int:
             contested=sim.contested,
             building_debuffs=sim.building_debuffs,
             event_log=sim.event_log,
+        diplomacy=sim.diplomacy,
         )
         store.insert_world_events(sim.event_log)
     finally:
@@ -308,6 +310,7 @@ def cmd_load(args: argparse.Namespace) -> int:
             contested,
             debuffs,
             events,
+            diplomacy,
         ) = store.load_latest_snapshot(args.world_id)
     finally:
         store.close()
@@ -326,9 +329,18 @@ def cmd_load(args: argparse.Namespace) -> int:
         f"  relations: {len(relations.pairs())} tracked pairs, "
         f"{hostile_pairs} hostile"
     )
-    print(f"  contested tiles: {len(contested)}, active debuffs: {len(debuffs)}")
+    wars = len(diplomacy.wars)
+    alliances = len(diplomacy.alliances)
+    offers = sum(len(v) for v in diplomacy.peace_offers.values())
+    print(
+        f"  diplomacy: {wars} wars, {alliances} alliances, {offers} live offers"
+    )
     raids = [e for e in events if e.type == "raid"]
-    print(f"  events logged: {len(events)} ({len(raids)} raids)")
+    diplo_events = [e for e in events if e.type in ("war", "peace", "peace_offer", "alliance")]
+    print(
+        f"  events logged: {len(events)} ({len(raids)} raids, "
+        f"{len(diplo_events)} diplomatic)"
+    )
     breakdown = world.terrain_breakdown()
     print(
         "  terrain: "
@@ -350,6 +362,7 @@ def cmd_step(args: argparse.Namespace) -> int:
             contested,
             debuffs,
             events,
+            diplomacy,
         ) = store.load_latest_snapshot(args.world_id)
         sim = simulation_from_state(
             world,
@@ -375,6 +388,7 @@ def cmd_step(args: argparse.Namespace) -> int:
             contested=sim.contested,
             building_debuffs=sim.building_debuffs,
             event_log=sim.event_log,
+        diplomacy=sim.diplomacy,
         )
         store.insert_world_events(sim.event_log)
     finally:
@@ -401,6 +415,7 @@ def cmd_god(args: argparse.Namespace) -> int:
             contested,
             debuffs,
             events,
+            diplomacy,
         ) = store.load_latest_snapshot(args.world_id)
         sim = simulation_from_state(
             world,
@@ -457,6 +472,7 @@ def cmd_god(args: argparse.Namespace) -> int:
             contested=sim.contested,
             building_debuffs=sim.building_debuffs,
             event_log=sim.event_log,
+        diplomacy=sim.diplomacy,
         )
     finally:
         store.close()

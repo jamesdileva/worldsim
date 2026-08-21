@@ -39,6 +39,14 @@ from .disasters import (
     PLAGUE_MORTALITY,
     roll_event,
 )
+from .diplomacy import (
+    PEACE_OFFER_VALIDITY_TICKS,
+    PEACE_TRIBUTE_FRACTION,
+    REPUTATION_RAID_COST,
+    REPUTATION_TREATY_BONUS,
+    REPUTATION_TRADE_FLOOR,
+    DiplomacyState,
+)
 from .relations import (
     RAID_ATTEMPTED_PENALTY,
     RAID_SUCCESS_PENALTY,
@@ -98,6 +106,9 @@ RAID_BUILDING_DEBUFF_TICKS = 200
 RAID_BUILDING_DEBUFF_MULTIPLIER = 0.5
 RAID_THEFT_UNITS = 10
 CONTESTED_EXPIRY_TICKS = 400
+
+# Sprint 10: diplomacy constants.
+ALLIANCE_MUTUAL_TRADES = 3
 
 
 @dataclass
@@ -159,7 +170,7 @@ class TradeRoute:
     """A trade link between two settlements (Sprint 4).
 
     Direction-agnostic: each tick the donor is whichever side holds more of
-    the resource the other side needs most. Transfers 1 unit/tick."""
+    the resource the other needs most. Transfers 1 unit/tick."""
 
     source_id: str
     dest_id: str
@@ -167,6 +178,9 @@ class TradeRoute:
     transfers: int = 0
     active: bool = True
     id: str = field(default_factory=lambda: str(uuid.uuid4()))
+    # Sprint 10: consecutive alternating-donor transfers (alliance trigger).
+    mutual_streak: int = 0
+    last_donor_id: str | None = None
 
     def partner_of(self, settlement_id: str) -> str:
         return self.dest_id if settlement_id == self.source_id else self.source_id
@@ -192,6 +206,9 @@ class Simulation:
     event_log: list[WorldEvent] = field(default_factory=list)
     last_raid_tick: dict[str, int] = field(default_factory=dict)
     _neighbors_cache: dict[str, list[str]] = field(default_factory=dict)
+    # Sprint 10: wars, alliances, peace offers, reputation.
+    diplomacy: DiplomacyState = field(default_factory=DiplomacyState)
+    _interacted_this_tick: set[str] = field(default_factory=set)
 
     @property
     def tick(self) -> int:
@@ -258,6 +275,8 @@ class Simulation:
         )
         if not settlement.personality:
             settlement.personality = assign_personality(self.world.seed, index)
+        # Seed the reputation ledger so non-interaction decay applies.
+        self.diplomacy.adjust_rep(settlement.id, 0.0)
         self.settlements.append(settlement)
         idx = len(self.settlements) - 1
         while len(self.agents) < idx:
@@ -625,6 +644,14 @@ class Simulation:
             return False
         if self.relations.label(a.id, b.id) == "hostile":
             return False  # hostile pairs don't open trade routes
+        if self.diplomacy.at_war(a.id, b.id):
+            return False
+        # Low-reputation settlements are refused credit (Sprint 10).
+        if (
+            self.diplomacy.rep(a.id) < REPUTATION_TRADE_FLOOR
+            or self.diplomacy.rep(b.id) < REPUTATION_TRADE_FLOOR
+        ):
+            return False
         for route in self.trade_routes:
             if not route.active:
                 continue
@@ -700,9 +727,27 @@ class Simulation:
                 + TRADE_AMOUNT_PER_TICK
             )
         route.transfers += 1
-        self.relations.adjust(
-            source.id, dest.id, TRADE_TRANSFER_BONUS
-        )
+        self._interacted_this_tick.update((source.id, dest.id))
+        self.relations.adjust(source.id, dest.id, TRADE_TRANSFER_BONUS)
+        # Sprint 10: alliance forms from sustained mutual trade.
+        if donor.id != route.last_donor_id and route.last_donor_id is not None:
+            route.mutual_streak += 1
+        else:
+            route.mutual_streak = 0
+        route.last_donor_id = donor.id
+        if (
+            route.mutual_streak >= ALLIANCE_MUTUAL_TRADES
+            and not self.diplomacy.is_allied(source.id, dest.id)
+            and self.diplomacy.form_alliance(source.id, dest.id)
+        ):
+            self.log_event(
+                "alliance",
+                [source.id, dest.id],
+                f"Alliance formed between {source.name} and {dest.name} "
+                f"after {route.mutual_streak} mutual trades",
+            )
+            self.diplomacy.adjust_rep(source.id, REPUTATION_TREATY_BONUS)
+            self.diplomacy.adjust_rep(dest.id, REPUTATION_TREATY_BONUS)
 
     def _auto_trade_rule(self) -> None:
         """Connect every adjacent, unlinked settlement pair."""
@@ -937,6 +982,81 @@ class Simulation:
     def _act_initiate_raid(self, s: Settlement) -> bool:
         return self.initiate_raid(s)
 
+    def _act_offer_peace(self, s: Settlement) -> bool:
+        """Offer peace to a war opponent. One-sided until they reciprocate."""
+        wars = self.diplomacy.wars_of(s.id)
+        if not wars:
+            return False
+        offered = False
+        for key in wars:
+            enemy_id = next(pid for pid in key if pid != s.id)
+            if self.diplomacy.has_live_offer(s.id, enemy_id, self.tick):
+                continue  # already offered
+            self.diplomacy.offer_peace(s.id, enemy_id, self.tick)
+            offered = True
+            enemy = self.settlement_by_id(enemy_id)
+            enemy_name = enemy.name if enemy else "unknown"
+            self.log_event(
+                "peace_offer",
+                [s.id, enemy_id],
+                f"{s.name} sent a peace offer to {enemy_name}",
+            )
+        return offered
+
+    def _act_accept_peace(self, s: Settlement) -> bool:
+        """Respond to a live incoming offer. Accepting constitutes sending
+        our own matching offer; peace concludes once BOTH sides have live
+        offers on the table (spec: both parties must send peace offers)."""
+        for key in list(self.diplomacy.wars_of(s.id)):
+            enemy_id = next(pid for pid in key if pid != s.id)
+            if not self.diplomacy.has_live_offer(enemy_id, s.id, self.tick):
+                continue
+            enemy = self.settlement_by_id(enemy_id)
+            if enemy is None:
+                continue
+            # Our acceptance sends our own offer in response.
+            self.diplomacy.offer_peace(s.id, enemy_id, self.tick)
+            both_live = self.diplomacy.has_live_offer(
+                s.id, enemy_id, self.tick
+            ) and self.diplomacy.has_live_offer(enemy_id, s.id, self.tick)
+            if both_live:
+                return self.conclude_peace(s, enemy)
+            return False
+        return False
+
+    def conclude_peace(self, a: Settlement, b: Settlement) -> bool:
+        """End the a-b war; the side that raided more pays 25% tribute."""
+        raids_by_a, raids_by_b = self.diplomacy.conclude_peace(a.id, b.id)
+        aggressor, victim = (
+            (a, b) if raids_by_a >= raids_by_b else (b, a)
+        )
+        # Tribute: 25% of the aggressor's stockpiles.
+        for resource in ("food", "wood", "stone"):
+            if resource == "food":
+                tribute = max(0.0, aggressor.food_stock * PEACE_TRIBUTE_FRACTION)
+                aggressor.food_stock -= tribute
+                victim.food_stock += tribute
+            else:
+                held = max(
+                    aggressor.resource_inventory.get(resource, 0.0), 0.0
+                )
+                tribute = held * PEACE_TRIBUTE_FRACTION
+                aggressor.resource_inventory[resource] = held - tribute
+                victim.resource_inventory[resource] = (
+                    victim.resource_inventory.get(resource, 0.0) + tribute
+                )
+        # Relations settle just below hostile threshold; both gain reputation.
+        self.relations.set_score(a.id, b.id, -20.0)
+        self.diplomacy.adjust_rep(a.id, REPUTATION_TREATY_BONUS)
+        self.diplomacy.adjust_rep(b.id, REPUTATION_TREATY_BONUS)
+        self.log_event(
+            "peace",
+            [a.id, b.id],
+            f"Peace concluded between {a.name} and {b.name}; "
+            f"{aggressor.name} paid 25% stockpile tribute",
+        )
+        return True
+
     def _act_boost_morale(self, s: Settlement) -> bool:
         """Small happiness bump; costs nothing this sprint."""
         from .settlement import HAPPINESS_MAX
@@ -1084,7 +1204,8 @@ class Simulation:
         """Attempt a raid on a hostile neighbour's resource buildings.
 
         Success: building output halved for 200 ticks + resource theft.
-        Either way relations sour. Returns True on success."""
+        Either way relations sour and war escalates. Returns True on
+        success."""
         import random as _random
 
         # Cadence enforcement (defense in depth with the agent policy).
@@ -1092,7 +1213,14 @@ class Simulation:
         if last is not None and self.tick - last < RAID_CADENCE_TICKS:
             return False
 
-        targets_by_defender = self._raidable_targets(attacker)
+        # Allies are never valid targets (Sprint 10 non-aggression floor).
+        targets_by_defender = {
+            did: tiles
+            for did, tiles in self._raidable_targets(attacker).items()
+            if not self.diplomacy.is_allied(attacker.id, did)
+        }
+        if not targets_by_defender:
+            return False
         if not targets_by_defender:
             return False
         defender_id = sorted(targets_by_defender.keys())[0]
@@ -1101,6 +1229,7 @@ class Simulation:
             return False
 
         self.last_raid_tick[attacker.id] = self.tick
+        self._interacted_this_tick.update((attacker.id, defender.id))
         aggression = attacker.personality.get("aggression", 0.5)
         size_factor = min(defender.population / 100.0, 0.4)
         success_chance = max(
@@ -1116,6 +1245,19 @@ class Simulation:
         self.relations.adjust(
             attacker.id, defender.id, -RAID_ATTEMPTED_PENALTY
         )
+        # Diplomatic escalation + reputation (Sprint 10).
+        war_declared = self.diplomacy.record_raid(
+            attacker.id, defender.id, self.tick
+        )
+        self.diplomacy.adjust_rep(attacker.id, -REPUTATION_RAID_COST)
+        if war_declared:
+            self.relations.adjust(attacker.id, defender.id, -200.0)
+            self.log_event(
+                "war",
+                [attacker.id, defender.id],
+                f"War declared: {attacker.name} raided {defender.name} "
+                f"3 times within 500 ticks",
+            )
         if not success:
             self.log_event(
                 "raid",
@@ -1242,6 +1384,9 @@ class Simulation:
         self.world.tick += 1
         self._neighbors_cache.clear()
         self.relations.decay_tick()
+        self.diplomacy.decay_tick(self._interacted_this_tick)
+        self.diplomacy.expire_stale_offers(self.tick)
+        self._interacted_this_tick = set()
         if self.tick % 50 == 0:
             self._refresh_contested_zones()
         # Expire building debuffs.
@@ -1399,6 +1544,7 @@ def simulation_from_state(
     contested: dict | None = None,
     building_debuffs: list[BuildingDebuff] | None = None,
     event_log: list[WorldEvent] | None = None,
+    diplomacy: DiplomacyState | None = None,
 ) -> Simulation:
     """Rebuild a Simulation from deserialized snapshot state (Sprint 6).
 
@@ -1414,6 +1560,7 @@ def simulation_from_state(
         contested=contested or {},
         building_debuffs=building_debuffs or [],
         event_log=event_log or [],
+        diplomacy=diplomacy if diplomacy is not None else DiplomacyState(),
     )
     sim.agents = [
         RuleBasedAgent(world.seed, idx) for idx in range(len(settlements))

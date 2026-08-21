@@ -31,9 +31,14 @@ def make_sim(seed: int = 42, count: int = 1) -> tuple[Simulation, list]:
 # Action space
 # ----------------------------------------------------------------------
 
-def test_exactly_60_unique_actions():
-    assert NUM_ACTIONS == 60
-    assert len(set(int(a) for a in Action)) == 60
+def test_action_ids_appended_not_renumbered():
+    """The original 60 IDs keep their values; diplomacy appended 60-61."""
+    assert NUM_ACTIONS == 62
+    assert int(Action.BUILD_FARM) == 0
+    assert int(Action.IDLE) == 59
+    assert int(Action.OFFER_PEACE) == 60
+    assert int(Action.ACCEPT_PEACE) == 61
+    assert len(set(int(a) for a in Action)) == 62
 
 
 def test_category_boundaries():
@@ -58,7 +63,7 @@ def test_every_action_executes_without_error():
 def test_invalid_action_id_rejected():
     sim, (s,) = make_sim(seed=42)
     assert not sim.execute_action(s, -1)
-    assert not sim.execute_action(s, 60)
+    assert not sim.execute_action(s, 62)
 
 
 def test_unwired_actions_are_noops():
@@ -110,8 +115,7 @@ def test_observation_reflects_state_changes():
 def test_reserved_dimensions_are_zero():
     sim, (s,) = make_sim(seed=42)
     obs = observe_vector(sim, s)
-    assert np.all(obs[32:42] == 0.0)  # military reserved
-    assert np.all(obs[45:48] == 0.0)  # diplomacy detail reserved
+    assert np.all(obs[32:42] == 0.0)  # military reserved until units exist
 
 
 def test_terrain_shares_sum_to_one():
@@ -206,7 +210,7 @@ def test_experience_row_structure():
     row = sim.experience_buffer[0]
     settlement_id, tick, obs, action, reward, next_obs, done = row
     assert settlement_id == s.id
-    assert isinstance(action, int) and 0 <= action < 60
+    assert isinstance(action, int) and 0 <= action < 62
     assert -1.0 <= reward <= 1.0
     assert len(obs) == 240 and len(next_obs) == 240  # 60 float32 bytes
     assert done is False

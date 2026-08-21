@@ -14,7 +14,7 @@ from worldsim.world import World
 
 def test_serialize_round_trip_exact():
     world = World(seed=555)
-    restored, settlements, routes, ruins, disasters, rels, contest, debuffs, events = deserialize_world(
+    restored, settlements, routes, ruins, disasters, rels, contest, debuffs, events, diplo = deserialize_world(
         serialize_world(world)
     )
     np.testing.assert_array_equal(world.terrain, restored.terrain)
@@ -30,6 +30,7 @@ def test_serialize_round_trip_exact():
     assert contest == {}
     assert debuffs == []
     assert events == []
+    assert len(diplo.wars) == 0 and len(diplo.alliances) == 0
 
 
 def test_save_and_load_world(tmp_path):
@@ -84,6 +85,7 @@ def test_snapshot_state_is_compressed_json(tmp_path):
             "contested",
             "building_debuffs",
             "event_log",
+            "diplomacy",
         }
     finally:
         store.close()

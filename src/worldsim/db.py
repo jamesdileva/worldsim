@@ -18,6 +18,7 @@ from pathlib import Path
 import numpy as np
 
 from .disasters import DisasterEvent, DisasterType
+from .diplomacy import DiplomacyState
 from .relations import RelationMatrix
 from .settlement import Settlement
 from .simulation import BuildingDebuff, RuinSite, TradeRoute, WorldEvent
@@ -274,6 +275,7 @@ def serialize_world(
     contested: dict | None = None,
     building_debuffs: list[BuildingDebuff] | None = None,
     event_log: list[WorldEvent] | None = None,
+    diplomacy: DiplomacyState | None = None,
 ) -> str:
     state = {
         "seed": world.seed,
@@ -305,6 +307,7 @@ def serialize_world(
             }
             for e in (event_log or [])
         ],
+        "diplomacy": diplomacy.to_dict() if diplomacy else {},
     }
     return json.dumps(state, sort_keys=True)
 
@@ -321,6 +324,7 @@ def deserialize_world(
     dict,
     list[BuildingDebuff],
     list[WorldEvent],
+    DiplomacyState,
 ]:
     state = json.loads(state_json)
     world = World(seed=state["seed"], size=state["size"])
@@ -359,6 +363,7 @@ def deserialize_world(
         )
         for obj in state.get("event_log", [])
     ]
+    diplomacy = DiplomacyState.from_dict(state.get("diplomacy", {}))
     return (
         world,
         settlements,
@@ -369,6 +374,7 @@ def deserialize_world(
         contested,
         building_debuffs,
         event_log,
+        diplomacy,
     )
 
 
@@ -401,6 +407,7 @@ class WorldStore:
         contested: dict | None = None,
         building_debuffs: list[BuildingDebuff] | None = None,
         event_log: list[WorldEvent] | None = None,
+        diplomacy: DiplomacyState | None = None,
     ) -> str:
         """Insert a world row, write a snapshot, and upsert settlement,
         resource, and trade-route rows."""
@@ -427,6 +434,7 @@ class WorldStore:
                         contested,
                         building_debuffs,
                         event_log,
+                        diplomacy,
                     ),
                 ),
             )
@@ -487,6 +495,7 @@ class WorldStore:
         dict,
         list[BuildingDebuff],
         list[WorldEvent],
+        DiplomacyState,
     ]:
         row = self._conn.execute(
             "SELECT state_json FROM snapshots WHERE world_id = ? "
@@ -529,6 +538,7 @@ class WorldStore:
         contested: dict | None = None,
         building_debuffs: list[BuildingDebuff] | None = None,
         event_log: list[WorldEvent] | None = None,
+        diplomacy: DiplomacyState | None = None,
     ) -> str:
         """Save under a caller-chosen id (upsert)."""
         if self.world_exists(world_id):
@@ -543,6 +553,7 @@ class WorldStore:
                 contested=contested,
                 building_debuffs=building_debuffs,
                 event_log=event_log,
+                diplomacy=diplomacy,
             )
             return world_id
         created_at = datetime.now(timezone.utc).isoformat()
@@ -566,6 +577,7 @@ class WorldStore:
                         contested,
                         building_debuffs,
                         event_log,
+                        diplomacy,
                     ),
                 ),
             )
@@ -619,6 +631,7 @@ class WorldStore:
         contested: dict | None = None,
         building_debuffs: list[BuildingDebuff] | None = None,
         event_log: list[WorldEvent] | None = None,
+        diplomacy: DiplomacyState | None = None,
     ) -> None:
         """Write a new snapshot for an existing world and bump last_tick."""
         if not self.world_exists(world_id):
@@ -644,6 +657,7 @@ class WorldStore:
                         contested,
                         building_debuffs,
                         event_log,
+                        diplomacy,
                     ),
                 ),
             )

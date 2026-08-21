@@ -5,6 +5,97 @@ Decisions worth remembering are marked **[DECISION]**.
 
 ---
 
+## Session 10 — 2026-08-20 — Sprint 10: Diplomacy & Trade Decisions
+
+**Scope:** Phase 2 / Sprint 10 — alliances from sustained mutual trade,
+automatic war declarations, bilateral peace treaties with tribute,
+reputation system with non-interaction decay.
+
+### What was built
+
+- `diplomacy.py` — `DiplomacyState`: alliance pairs, wars (start tick +
+  raid ledger), pending peace offers (200-tick validity), per-settlement
+  reputation [−100,+100] with 0.001/tick non-interaction decay
+- `actions.py` — **appended OFFER_PEACE=60, ACCEPT_PEACE=61** (first append;
+  originals untouched), wired both handlers, new "diplomacy" category
+- `simulation.py` —
+  - war escalation: every raid recorded; 3 by same attacker/victim inside
+    500 ticks → automatic declaration, relations pinned −100, event logged
+  - raids against allies blocked at handler level (non-aggression floor)
+  - peace: OFFER_PEACE creates a live offer; ACCEPT_PEACE sends our matching
+    offer; treaty concludes when BOTH offers are live; aggressor (more
+    logged raids) pays 25% stockpile tribute to victim; +10 rep each side;
+    relations reset to −20 (below hostile — no instant re-raid)
+  - alliance: TradeRoute tracks alternating-donor streak; ≥3 → alliance +
+    reputation bonuses + event
+  - trade gating: at-war pairs and rep < −50 refused new routes; routes die
+    below war threshold
+  - reputation seeded per settlement at registration; decay skips
+    settlements that interacted that tick (raids/transfers)
+- Observation dims 45–47 wired: at-war flag, incoming-offer flag, normalized
+  reputation (`docs/agent_spec.md` updated)
+- Agent policy: peaceful settlements offer/accept peace; aggressive ones
+  never accept; long wars wear down even aggressive settlements
+  (WAR_WEARINESS_TICKS=1000 offer cadence)
+- Persistence: diplomacy serialized in snapshots (10-tuple API);
+  `world_events` table carries diplomatic records
+- Tests: 183 passing (20 new)
+
+### Decisions
+
+- **[DECISION] Appended IDs 60–61** for peace actions — contract rule is
+  "never renumber, only append", exercised for the first time.
+- **[DECISION] Peace concludes iff BOTH sides have live offers** (strict
+  spec reading). ACCEPT_PEACE constitutes sending our own matching offer —
+  so an offer plus an acceptance satisfies the bilateral requirement.
+- **[DECISION] Tribute = 25% of aggressor's food/wood/stone stockpiles**,
+  aggressor determined by the war's raid ledger (ties → first-listed side).
+  Wars declared directly without raids have no recorded aggressor — tests
+  escalate naturally via record_raid.
+- **[DECISION] Alliance = 3 consecutive alternating-donor transfers**
+  (operationalization of "mutually beneficial for 3 consecutive trades");
+  one-way flow resets the streak.
+- **[DECISION] Alliance effect this sprint = non-aggression floor only**
+  (user choice); defensive pacts deferred.
+- **[DECISION] Reputation decays only during non-interaction**: settlements
+  involved in a raid or transfer that tick skip decay.
+
+### Gotchas / bugs found & fixed
+
+- update_world missed the diplomacy kwarg (signature replaceAll matched only
+  the `-> str:` save methods) — caught by persistence tests.
+- conclude_peace tie-break picked the wrong aggressor for directly-declared
+  wars (no raid ledger); tests now escalate naturally via record_raid.
+- Reputation decay silently did nothing until entries were seeded — rep()
+  defaulted to 0 without storing a key; registration now seeds the ledger.
+
+### Known issues / deferred
+
+- No defensive pact: allies don't join each other's wars yet.
+- Reputation currently affects only trade access; no opinion modifiers on
+  raid targeting or peace willingness (personality covers that).
+- War has no cost beyond raids themselves — no unit losses until military
+  units exist.
+- Full-suite runtime crossed 14 minutes; consider splitting slow integration
+  tests before Phase 3's parallel-training work.
+
+### Acceptance criteria status
+
+- ✅ Alliances form when trade is mutually beneficial for 3 consecutive trades
+- ✅ War declared if a neighbor raided 3 times within 500 ticks
+- ✅ Peace treaties require both parties' offers (acceptance counts as
+  sending your own)
+- ✅ Reputation decays 0.1 per 100 ticks of non-interaction (verified: 0.100)
+- ✅ Diplomatic events logged: alliance/war/peace_offer/peace types
+
+### Next up (Sprint 11)
+
+Emergent specialization & strategy differentiation: 5 personality archetypes
+(agricultural/mining/trading/military/balanced), strategy labels derived from
+behavior, strategy memory — closing out Phase 2.
+
+---
+
 ## Session 9 — 2026-08-20 — Sprint 9: Multiple Settlements & Competition
 
 **Scope:** Phase 2 / Sprint 9 — neighbor detection, relation states, raids

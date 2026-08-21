@@ -58,6 +58,12 @@ class RelationMatrix:
         self._scores[key] = new
         return new
 
+    def set_score(self, a: str, b: str, value: float) -> float:
+        key = self._key(a, b)
+        value = max(SCORE_MIN, min(SCORE_MAX, value))
+        self._scores[key] = value
+        return value
+
     def decay_tick(self) -> None:
         """Move every score toward 0 by DECAY_PER_TICK."""
         for key, score in list(self._scores.items()):

@@ -88,6 +88,10 @@ class Action(enum.IntEnum):
     WAIT = 58
     IDLE = 59
 
+    # Diplomacy (appended Sprint 10; IDs only ever append, never renumber)
+    OFFER_PEACE = 60
+    ACCEPT_PEACE = 61
+
 
 NUM_ACTIONS = len(Action)
 
@@ -102,6 +106,8 @@ WIRED_ACTIONS: dict[Action, str] = {
     Action.CLAIM_TERRITORY: "claim_territory",
     Action.ESTABLISH_TRADE_ROUTE: "establish_trade_route",
     Action.INITIATE_RAID: "initiate_raid",
+    Action.OFFER_PEACE: "offer_peace",
+    Action.ACCEPT_PEACE: "accept_peace",
     Action.BOOST_MORALE: "boost_morale",
     Action.WAIT: "wait",
     Action.IDLE: "idle",
@@ -124,4 +130,6 @@ def action_category(action: Action) -> str:
         return "research"
     if value < 54:
         return "social"
+    if value >= 60:
+        return "diplomacy"
     return "meta"

@@ -51,7 +51,13 @@
 | 42 | hostile neighbors | count / 5 |
 | 43 | friendly neighbors | count / 5 |
 | 44 | contested tiles | count / 500 |
-| 45–47 | **reserved**: diplomacy detail | wired Sprints 10–11 |
+| 45 | at-war flag | 1 if any active war |
+| 46 | incoming peace offer | 1 if live offer targets us |
+| 47 | reputation | (rep + 100) / 200 |
+| 48–51 | **reserved**: diplomacy detail | wired Sprints 10–11 |
+
+Note: dims 48–51 in the original layout were repurposed as world aggregates
+during Sprint 7's initial fill; diplomacy detail remains reserved at 48–51.
 | 48 | living settlements | count / 20 |
 | 49 | ruins | count / 20 |
 | 50 | active disasters | count / 5 |
@@ -129,6 +135,14 @@ RESEARCH_TECHNOLOGY, PRIORITIZE_INNOVATION, SHARE_KNOWLEDGE, IDLE_RESEARCH
 | 57 | EMERGENCY_RESPONSE | no-op* | rule-based agent uses it as a famine signal; currently a no-op effect |
 | 58 | WAIT | yes (no-op) | explicit pass |
 | 59 | IDLE | yes (no-op) | explicit pass |
+
+### Diplomacy (60–61, appended Sprint 10 — IDs only ever append)
+| ID | Name | Wired | Effect |
+|----|------|-------|--------|
+| 60 | OFFER_PEACE | yes | send peace offer to war opponent (valid 200 ticks; bilateral acceptance concludes peace + tribute) |
+| 61 | ACCEPT_PEACE | yes | accept a live incoming offer, concluding the war |
+
+**Total: 62 actions.** Original IDs 0–59 are frozen; new actions append only.
 
 ## Reward (placeholder until Sprint 13)
 

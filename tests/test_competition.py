@@ -322,6 +322,7 @@ def test_event_log_serialized_in_snapshot():
             _,
             _,
             events,
+            diplo,
         ) = store.load_latest_snapshot(wid)
         assert len(events) >= 1
         assert any(e.type == "trade_route" for e in events)

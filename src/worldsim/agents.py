@@ -32,6 +32,8 @@ TRADE_INTERVAL_TICKS = 24
 # Raids (Sprint 9): aggressive personalities only, hostile relations only.
 RAID_CADENCE_TICKS = 200
 RAID_AGGRESSION_GATE = 0.7
+# Peace offers (Sprint 10): long wars wear down even aggressive settlements.
+WAR_WEARINESS_TICKS = 1000
 
 
 def observe_vector(sim, settlement: Settlement) -> np.ndarray:
@@ -125,7 +127,20 @@ def observe_vector(sim, settlement: Settlement) -> np.ndarray:
     obs[42] = clamp01(hostile_neighbors / 5.0)
     obs[43] = clamp01(friendly_neighbors / 5.0)
     obs[44] = clamp01(len(sim.contested) / 500.0)
-    # 45-47: reserved research/diplomacy detail.
+    # Sprint 10 diplomacy detail:
+    at_war = sum(1 for key in sim.diplomacy.wars_of(settlement.id))
+    incoming_offer = any(
+        sim.diplomacy.has_live_offer(enemy_id, settlement.id, w.tick)
+        for enemy_id in {
+            next(pid for pid in key if pid != settlement.id)
+            for key in sim.diplomacy.wars_of(settlement.id)
+        }
+    )
+    obs[45] = 1.0 if at_war else 0.0
+    obs[46] = 1.0 if incoming_offer else 0.0
+    obs[47] = clamp01(
+        (sim.diplomacy.rep(settlement.id) + 100.0) / 200.0
+    )
 
     # --- World-level aggregates ---------------------------------------
     obs[48] = clamp01(sum(1 for s in sim.settlements if s.is_alive) / 20.0)
@@ -274,6 +289,20 @@ class RuleBasedAgent(Agent):
             and self.call_count % RAID_CADENCE_TICKS == 15
         ):
             return int(Action.INITIATE_RAID)
+
+        # --- Urgency 3.6: peace diplomacy (Sprint 10) ----------------------
+        # Accept incoming offers unless highly aggressive; offer peace when
+        # weary of war or naturally peaceful.
+        at_war = float(obs[45]) > 0.0
+        incoming_offer = float(obs[46]) > 0.0
+        if at_war and incoming_offer and aggression < 0.7:
+            if self.call_count % 100 == 3:
+                return int(Action.ACCEPT_PEACE)
+        if at_war and aggression < 0.4:
+            if self.call_count % 100 == 33:
+                return int(Action.OFFER_PEACE)
+        elif at_war and self.call_count % (WAR_WEARINESS_TICKS) == 55:
+            return int(Action.OFFER_PEACE)
 
         # --- Urgency 4: resource income (sub-cadence gated) --------------
         if wood < stockpile_floor and has_farm and can_sawmill and self.call_count % 8 == 2:
