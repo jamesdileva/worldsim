@@ -110,7 +110,8 @@ def test_observation_reflects_state_changes():
 def test_reserved_dimensions_are_zero():
     sim, (s,) = make_sim(seed=42)
     obs = observe_vector(sim, s)
-    assert np.all(obs[32:48] == 0.0)  # military/research/diplomacy reserved
+    assert np.all(obs[32:42] == 0.0)  # military reserved
+    assert np.all(obs[45:48] == 0.0)  # diplomacy detail reserved
 
 
 def test_terrain_shares_sum_to_one():

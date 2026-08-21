@@ -101,6 +101,7 @@ WIRED_ACTIONS: dict[Action, str] = {
     Action.EXPAND_ROAD_NETWORK: "expand_road_network",
     Action.CLAIM_TERRITORY: "claim_territory",
     Action.ESTABLISH_TRADE_ROUTE: "establish_trade_route",
+    Action.INITIATE_RAID: "initiate_raid",
     Action.BOOST_MORALE: "boost_morale",
     Action.WAIT: "wait",
     Action.IDLE: "idle",

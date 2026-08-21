@@ -46,9 +46,12 @@
 | 29 | negative-food streak | ticks / 50 |
 | 30 | drought exposure | active droughts / 3 |
 | 31 | ruin adjacency flag | 1 if within 2 tiles of origin ruin |
-| 32–37 | **reserved**: military | wired Sprint 9+ |
+| 32–37 | **reserved**: military | wired Sprint 9+ (units) |
 | 38–41 | **reserved**: research/tech | wired Phase 3+ |
-| 42–47 | **reserved**: neighbors/diplomacy | wired Sprints 9–11 |
+| 42 | hostile neighbors | count / 5 |
+| 43 | friendly neighbors | count / 5 |
+| 44 | contested tiles | count / 500 |
+| 45–47 | **reserved**: diplomacy detail | wired Sprints 10–11 |
 | 48 | living settlements | count / 20 |
 | 49 | ruins | count / 20 |
 | 50 | active disasters | count / 5 |
@@ -98,12 +101,15 @@
 ### Economy (30–37)
 | ID | Name | Wired | Effect |
 |----|------|-------|--------|
-| 30 | ESTABLISH_TRADE_ROUTE | yes | connect to all adjacent unlinked settlements |
+| 30 | ESTABLISH_TRADE_ROUTE | yes | connect to all adjacent unlinked non-hostile settlements |
 | 31 | REQUEST_RESOURCE_TRADE | no-op | Sprint 10 diplomacy |
 | 32–37 | (store/sell/buy/budget/hedge/idle) | no-op | markets are Phase 6 |
 
-### Military (38–43) — unwired until Sprint 9+
-TRAIN_DEFENDER, TRAIN_RAIDER, FORTIFY_BORDER, INITIATE_RAID, DISBAND_MILITARY, IDLE_MILITARY
+### Military (38–43) — partially wired as of Sprint 9
+| ID | Name | Wired | Effect |
+|----|------|-------|--------|
+| 41 | INITIATE_RAID | yes | raid hostile neighbor's contested buildings: 200-tick output debuff + theft |
+| 38–40, 42–43 | (train/fortify/disband/idle) | no-op | units arrive later |
 
 ### Research (44–47) — unwired until Phase 3+
 RESEARCH_TECHNOLOGY, PRIORITIZE_INNOVATION, SHARE_KNOWLEDGE, IDLE_RESEARCH

@@ -5,6 +5,92 @@ Decisions worth remembering are marked **[DECISION]**.
 
 ---
 
+## Session 9 — 2026-08-20 — Sprint 9: Multiple Settlements & Competition
+
+**Scope:** Phase 2 / Sprint 9 — neighbor detection, relation states, raids
+with timed debuffs + theft, contested border zones, event log, aggression
+personalities finally wired.
+
+### What was built
+
+- `relations.py` — `RelationMatrix`: symmetric pairwise scores [−100,+100];
+  trade pushes positive (+10 route, +0.05/transfer), raids push negative
+  (−20 attempted, −30 success); decay 0.025/tick toward neutral (~2000 ticks
+  to fully cool −50); hostile < −25, friendly > +25, war (route kill) < −60
+- `simulation.py` —
+  - `neighbors_of()`: spawn distance ≤48 OR territory contact; per-tick cache
+  - `INITIATE_RAID` wired (#41): targets hostile neighbors' improved tiles in
+    contested zones; success = clamp(0.4 + aggression×0.4 − defender-size);
+    success applies 200-tick ×0.5 building-output debuffs (`BuildingDebuff`)
+    + steals ≤10 wood/stone; cadence-enforced both in policy and handler
+  - contested zones: recomputed every 50 ticks from hostile-pair borders;
+    keys are (x, y) tile coords with expiry
+  - trade gating: hostile pairs can't open routes; routes deactivate below
+    war threshold; relations adjust on establish/transfer
+  - `WorldEvent` log: raid/trade_route events with descriptions
+- `agents.py` — raid policy branch: aggression > 0.7 AND hostile neighbor
+  AND %200 cadence; observation dims 42–44 wired (hostile/friendly neighbor
+  counts, contested-tile count) — see updated `docs/agent_spec.md`
+- `db.py` — `world_events` table + `insert_world_events()`; snapshots now
+  serialize relations, contested zones, debuffs, event log (9-tuple API)
+- Default settlements 3 → 5
+- Tests: 163 passing (18 new)
+
+### Decisions
+
+- **[DECISION] Border-friction contested zones**, not overlapping ownership —
+  claims stay unowned-only; hostile borders get flagged as raid targets with
+  expiry. Minimal disruption to existing mechanics.
+- **[DECISION] Raids yield debuff + theft**: spec's 200-tick output halving
+  plus up to 10 units stolen per resource — raids need a payoff beyond spite.
+- **[DECISION] Personality-gated raids only**: aggression > 0.7, hostile
+  relation, ≥200-tick cadence (enforced in both agent and handler). No
+  desperation raids yet.
+- **[DECISION] Deterministic entity IDs**: settlement/route/ruin ids switched
+  from uuid4 to uuid5(seed/index/pair/tick). Found via demo: the raid RNG
+  hashes attacker ids, so uuid4 ids silently broke cross-run determinism.
+  This was a latent Phase-3 blocker caught early.
+- **[DECISION] deserialize_world now returns a 9-tuple** (added relations,
+  contested, debuffs, event log).
+
+### Gotchas / bugs found & fixed
+
+- Coordinate-swap triple-play on contested zones: dict keyed (row,col) while
+  `is_contested(x,y)` looked up (x,y); test helper then re-swapped unpacking.
+  Standardized keys to (x, y).
+- `_refresh_contested_zones` only pruned expired flags — peace never lifted
+  contested status. Now fully recomputed from current relations.
+- Demo determinism check itself was buggy (compared final state 100×); the
+  underlying uuid4 issue was real and fixed.
+
+### Known issues / deferred
+
+- Raid targets limited to contested-zone buildings; deep strikes impossible
+  until movement/military exists.
+- No defender agency: defense is implicit (population size lowers raid
+  success). Real defense units are a later sprint.
+- Relations affect nothing diplomatically yet beyond trade gating and raid
+  permission — alliances/wars/peace treaties are Sprint 10.
+- Neighbor detection ignores territory growth between refreshes for spawn-
+  distance pairs (contact via adjacency covers it).
+
+### Acceptance criteria status
+
+- ✅ 5 settlements start without overlapping territory (45 owned tiles)
+- ✅ Neighbors detected dynamically (spawn distance OR territory contact)
+- ✅ Raiding reduces Farm output for exactly 200 ticks (unit-tested recovery)
+- ✅ Trade routes form naturally between non-hostile neighbors
+- ✅ Hostile relations decay over time unless re-triggered (unit-tested)
+- ✅ Events log captures "A raided B" / "C and D established trade"
+
+### Next up (Sprint 10)
+
+Diplomacy & trade decisions: alliances, war declarations from repeated raids,
+peace treaties with tribute, reputation system with decay, diplomatic actions
+in the action space.
+
+---
+
 ## Session 8 — 2026-08-20 — Sprint 8: Rule-Based Baseline Competence
 
 **Scope:** Phase 2 / Sprint 8 — urgency-ordered decision policy, personality

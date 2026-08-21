@@ -188,14 +188,18 @@ def cmd_generate(args: argparse.Namespace) -> int:
 
 def _autosave(store: WorldStore, args, sim: Simulation, world_id: str | None) -> str:
     """Persist current state under the given id (or a fresh one)."""
-    state = dict(
+    kwargs = dict(
         settlements=sim.settlements,
         trade_routes=sim.trade_routes,
         ruins=sim.ruins,
         disaster_events=sim.disaster_events,
+        relations=sim.relations,
+        contested=sim.contested,
+        building_debuffs=sim.building_debuffs,
+        event_log=sim.event_log,
     )
     return store.save_world_with_id(
-        world_id if world_id is not None else str(uuid.uuid4()), sim.world, **state
+        world_id if world_id is not None else str(uuid.uuid4()), sim.world, **kwargs
     )
 
 
@@ -247,6 +251,7 @@ def cmd_simulate(args: argparse.Namespace) -> int:
         if store is not None:
             sim.flush_experiences(store)
             wid = _autosave(store, args, sim, args.world_id)
+            store.insert_world_events(sim.event_log)
             print(f"\nSaved to {args.db} (world_id={wid})")
     finally:
         if store is not None:
@@ -274,11 +279,16 @@ def cmd_save(args: argparse.Namespace) -> int:
         store.save_world_with_id(
             args.world_id,
             sim.world,
-            sim.settlements,
+            settlements=sim.settlements,
             trade_routes=sim.trade_routes,
             ruins=sim.ruins,
             disaster_events=sim.disaster_events,
+            relations=sim.relations,
+            contested=sim.contested,
+            building_debuffs=sim.building_debuffs,
+            event_log=sim.event_log,
         )
+        store.insert_world_events(sim.event_log)
     finally:
         store.close()
     print(f"Saved world {args.world_id} (seed={args.seed}, tick={sim.tick})")
@@ -288,9 +298,17 @@ def cmd_save(args: argparse.Namespace) -> int:
 def cmd_load(args: argparse.Namespace) -> int:
     store = WorldStore(args.db)
     try:
-        world, settlements, routes, ruins, disasters = (
-            store.load_latest_snapshot(args.world_id)
-        )
+        (
+            world,
+            settlements,
+            routes,
+            ruins,
+            disasters,
+            relations,
+            contested,
+            debuffs,
+            events,
+        ) = store.load_latest_snapshot(args.world_id)
     finally:
         store.close()
     alive = [s for s in settlements if s.is_alive]
@@ -301,6 +319,16 @@ def cmd_load(args: argparse.Namespace) -> int:
         print(f"    [{s.name}] {status}")
     print(f"  trade routes: {sum(1 for r in routes if r.active)} active")
     print(f"  ruins: {len(ruins)}, disasters recorded: {len(disasters)}")
+    hostile_pairs = sum(
+        1 for _, _, score in relations.pairs() if score < -25
+    )
+    print(
+        f"  relations: {len(relations.pairs())} tracked pairs, "
+        f"{hostile_pairs} hostile"
+    )
+    print(f"  contested tiles: {len(contested)}, active debuffs: {len(debuffs)}")
+    raids = [e for e in events if e.type == "raid"]
+    print(f"  events logged: {len(events)} ({len(raids)} raids)")
     breakdown = world.terrain_breakdown()
     print(
         "  terrain: "
@@ -312,22 +340,43 @@ def cmd_load(args: argparse.Namespace) -> int:
 def cmd_step(args: argparse.Namespace) -> int:
     store = WorldStore(args.db)
     try:
-        world, settlements, routes, ruins, disasters = (
-            store.load_latest_snapshot(args.world_id)
-        )
+        (
+            world,
+            settlements,
+            routes,
+            ruins,
+            disasters,
+            relations,
+            contested,
+            debuffs,
+            events,
+        ) = store.load_latest_snapshot(args.world_id)
         sim = simulation_from_state(
-            world, settlements, routes, ruins, disasters
+            world,
+            settlements,
+            routes,
+            ruins,
+            disasters,
+            relations=relations,
+            contested=contested,
+            building_debuffs=debuffs,
+            event_log=events,
         )
         before_tick = sim.tick
         sim.run(args.ticks)
         store.update_world(
             args.world_id,
             sim.world,
-            sim.settlements,
+            settlements=sim.settlements,
             trade_routes=sim.trade_routes,
             ruins=sim.ruins,
             disaster_events=sim.disaster_events,
+            relations=sim.relations,
+            contested=sim.contested,
+            building_debuffs=sim.building_debuffs,
+            event_log=sim.event_log,
         )
+        store.insert_world_events(sim.event_log)
     finally:
         store.close()
     print(
@@ -342,11 +391,27 @@ def cmd_step(args: argparse.Namespace) -> int:
 def cmd_god(args: argparse.Namespace) -> int:
     store = WorldStore(args.db)
     try:
-        world, settlements, routes, ruins, disasters = (
-            store.load_latest_snapshot(args.world_id)
-        )
+        (
+            world,
+            settlements,
+            routes,
+            ruins,
+            disasters,
+            relations,
+            contested,
+            debuffs,
+            events,
+        ) = store.load_latest_snapshot(args.world_id)
         sim = simulation_from_state(
-            world, settlements, routes, ruins, disasters
+            world,
+            settlements,
+            routes,
+            ruins,
+            disasters,
+            relations=relations,
+            contested=contested,
+            building_debuffs=debuffs,
+            event_log=events,
         )
         target = None
         before: dict | None = None
@@ -384,10 +449,14 @@ def cmd_god(args: argparse.Namespace) -> int:
         store.update_world(
             args.world_id,
             sim.world,
-            sim.settlements,
+            settlements=sim.settlements,
             trade_routes=sim.trade_routes,
             ruins=sim.ruins,
             disaster_events=sim.disaster_events,
+            relations=sim.relations,
+            contested=sim.contested,
+            building_debuffs=sim.building_debuffs,
+            event_log=sim.event_log,
         )
     finally:
         store.close()

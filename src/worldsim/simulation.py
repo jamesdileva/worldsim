@@ -15,7 +15,13 @@ from dataclasses import dataclass, field
 import numpy as np
 
 from .actions import Action, WIRED_ACTIONS, action_category
-from .agents import Agent, RuleBasedAgent, placeholder_reward
+from .agents import (
+    RAID_AGGRESSION_GATE,
+    RAID_CADENCE_TICKS,
+    Agent,
+    RuleBasedAgent,
+    placeholder_reward,
+)
 from .buildings import (
     BASE_FOOD_CAPACITY,
     BUILDING_SPECS,
@@ -32,6 +38,14 @@ from .disasters import (
     EVENT_CHECK_INTERVAL_TICKS,
     PLAGUE_MORTALITY,
     roll_event,
+)
+from .relations import (
+    RAID_ATTEMPTED_PENALTY,
+    RAID_SUCCESS_PENALTY,
+    RelationMatrix,
+    TRADE_ESTABLISHED_BONUS,
+    TRADE_TRANSFER_BONUS,
+    WAR_THRESHOLD,
 )
 from .settlement import (
     LOW_HAPPINESS_COLLAPSE_TICKS,
@@ -63,7 +77,7 @@ BUILD_PRIORITY = [
 GATHER_RATE = 0.25
 
 # Multi-spawn (minimal Sprint 9 pull-forward) and trade (Sprint 4).
-DEFAULT_SETTLEMENT_COUNT = 3
+DEFAULT_SETTLEMENT_COUNT = 5
 SPAWN_MIN_DISTANCE = 32
 TRADE_INTERVAL_TICKS = 24
 TRADE_AMOUNT_PER_TICK = 1.0
@@ -77,6 +91,37 @@ RUIN_SEED_OFFSET = 4_000_000
 RUIN_RESETTLE_MIN_AGE = 500
 RUIN_RESETTLE_CHANCE = 0.10
 RUIN_GROWTH_MULTIPLIER = 2
+
+# Competition (Sprint 9): neighbors, raids, contested zones, events.
+NEIGHBOR_SPAWN_DISTANCE = 48
+RAID_BUILDING_DEBUFF_TICKS = 200
+RAID_BUILDING_DEBUFF_MULTIPLIER = 0.5
+RAID_THEFT_UNITS = 10
+CONTESTED_EXPIRY_TICKS = 400
+
+
+@dataclass
+class BuildingDebuff:
+    """A timed output reduction on one improved tile (raids, disasters)."""
+
+    x: int
+    y: int
+    multiplier: float
+    expires_tick: int
+    cause: str
+
+    def active(self, tick: int) -> bool:
+        return tick < self.expires_tick
+
+
+@dataclass
+class WorldEvent:
+    """An inter-settlement interaction record (Sprint 9)."""
+
+    tick: int
+    type: str  # raid | trade_route | relation | disaster | collapse ...
+    actor_ids: list[str]
+    description: str
 
 # Spawn search: best-food 3x3 neighborhood within the central region.
 SPAWN_SEARCH_RADIUS = 64
@@ -140,6 +185,13 @@ class Simulation:
     experience_buffer: list[tuple] = field(default_factory=list)
     action_counts: dict[int, int] = field(default_factory=dict)
     _pending_transitions: dict[str, tuple] = field(default_factory=dict)
+    # Sprint 9: relations, contested zones, debuffs, event log, raids.
+    relations: RelationMatrix = field(default_factory=RelationMatrix)
+    contested: dict[tuple[int, int], int] = field(default_factory=dict)  # tile -> expiry
+    building_debuffs: list[BuildingDebuff] = field(default_factory=list)
+    event_log: list[WorldEvent] = field(default_factory=list)
+    last_raid_tick: dict[str, int] = field(default_factory=dict)
+    _neighbors_cache: dict[str, list[str]] = field(default_factory=dict)
 
     @property
     def tick(self) -> int:
@@ -198,10 +250,14 @@ class Simulation:
     ) -> Settlement:
         """Append a settlement, align its agent slot, and claim 3x3."""
         settlement.ruin_origin = ruin_origin
+        # Deterministic id: identical runs must produce identical worlds
+        # (raid RNG and event logs hash these ids).
+        index = len(self.settlements)
+        settlement.id = str(
+            uuid.uuid5(uuid.NAMESPACE_URL, f"worldsim/{self.world.seed}/{index}")
+        )
         if not settlement.personality:
-            settlement.personality = assign_personality(
-                self.world.seed, len(self.settlements)
-            )
+            settlement.personality = assign_personality(self.world.seed, index)
         self.settlements.append(settlement)
         idx = len(self.settlements) - 1
         while len(self.agents) < idx:
@@ -567,6 +623,8 @@ class Simulation:
     def can_establish_route(self, a: Settlement, b: Settlement) -> bool:
         if a is b or not (a.is_alive and b.is_alive):
             return False
+        if self.relations.label(a.id, b.id) == "hostile":
+            return False  # hostile pairs don't open trade routes
         for route in self.trade_routes:
             if not route.active:
                 continue
@@ -586,16 +644,32 @@ class Simulation:
             source_id=source.id,
             dest_id=dest.id,
             established_tick=self.tick,
+            # Deterministic id for snapshot reproducibility.
+            id=str(
+                uuid.uuid5(
+                    uuid.NAMESPACE_URL,
+                    f"worldsim/route/{source.id}/{dest.id}/{self.tick}",
+                )
+            ),
         )
         self.trade_routes.append(route)
+        self.relations.adjust(source.id, dest.id, TRADE_ESTABLISHED_BONUS)
+        self.log_event(
+            "trade_route",
+            [source.id, dest.id],
+            f"{source.name} and {dest.name} established trade",
+        )
         return route
 
     def _trade_tick(self, route: TradeRoute) -> None:
         """Move 1 unit of the best-arbitrage resource across the route."""
         source = self.settlement_by_id(route.source_id)
         dest = self.settlement_by_id(route.dest_id)
-        if source is None or dest is None or not (
-            source.is_alive and dest.is_alive
+        if (
+            source is None
+            or dest is None
+            or not (source.is_alive and dest.is_alive)
+            or self.relations.score(source.id, dest.id) < WAR_THRESHOLD
         ):
             route.active = False
             return
@@ -626,6 +700,9 @@ class Simulation:
                 + TRADE_AMOUNT_PER_TICK
             )
         route.transfers += 1
+        self.relations.adjust(
+            source.id, dest.id, TRADE_TRANSFER_BONUS
+        )
 
     def _auto_trade_rule(self) -> None:
         """Connect every adjacent, unlinked settlement pair."""
@@ -756,6 +833,13 @@ class Simulation:
             spawn_x=settlement.spawn_x,
             spawn_y=settlement.spawn_y,
             collapse_tick=self.tick,
+            # Deterministic id (resettle RNG hashes it).
+            id=str(
+                uuid.uuid5(
+                    uuid.NAMESPACE_URL,
+                    f"worldsim/{settlement.id}/ruin/{self.tick}",
+                )
+            ),
         )
         self.ruins.append(ruin)
         return ruin
@@ -850,6 +934,9 @@ class Simulation:
     def _act_expand_road_network(self, s: Settlement) -> bool:
         return self._auto_road_rule(s)
 
+    def _act_initiate_raid(self, s: Settlement) -> bool:
+        return self.initiate_raid(s)
+
     def _act_boost_morale(self, s: Settlement) -> bool:
         """Small happiness bump; costs nothing this sprint."""
         from .settlement import HAPPINESS_MAX
@@ -881,18 +968,212 @@ class Simulation:
         return bool(method(settlement))
 
     # ------------------------------------------------------------------
+    # Neighbors, relations, raids (Sprint 9)
+    # ------------------------------------------------------------------
+
+    def log_event(
+        self, type_: str, actor_ids: list[str], description: str
+    ) -> None:
+        self.event_log.append(
+            WorldEvent(
+                tick=self.tick,
+                type=type_,
+                actor_ids=actor_ids,
+                description=description,
+            )
+        )
+
+    def neighbors_of(self, settlement: Settlement) -> list[Settlement]:
+        """Settlements within spawn distance or territory contact.
+        Cached per tick."""
+        cached = self._neighbors_cache.get(settlement.id)
+        if cached is not None:
+            return [
+                s for s in self.settlements if s.id in cached and s.is_alive
+            ]
+        ids: list[str] = []
+        for other in self.settlements:
+            if other is settlement or not other.is_alive:
+                continue
+            dist = max(
+                abs(other.spawn_x - settlement.spawn_x),
+                abs(other.spawn_y - settlement.spawn_y),
+            )
+            if dist <= NEIGHBOR_SPAWN_DISTANCE or self._territories_adjacent(
+                self.settlements.index(settlement),
+                self.settlements.index(other),
+            ):
+                ids.append(other.id)
+        self._neighbors_cache[settlement.id] = ids
+        return [s for s in self.settlements if s.id in ids]
+
+    def _refresh_contested_zones(self) -> None:
+        """Recompute contested border tiles from current relations."""
+        self.contested = {}
+        for id_a, id_b, score in self.relations.pairs():
+            if score >= -25.0:
+                continue
+            a = self.settlement_by_id(id_a)
+            b = self.settlement_by_id(id_b)
+            if a is None or b is None or not (a.is_alive and b.is_alive):
+                continue
+            idx_a, idx_b = (
+                self.settlements.index(a),
+                self.settlements.index(b),
+            )
+            owned_a = self.world.ownership == idx_a
+            owned_b = self.world.ownership == idx_b
+            grown = owned_a.copy()
+            for dy in (-1, 0, 1):
+                for dx in (-1, 0, 1):
+                    shifted = np.zeros_like(owned_a)
+                    ys = slice(max(dy, 0), self.world.size + min(dy, 0))
+                    xs = slice(max(dx, 0), self.world.size + min(dx, 0))
+                    yd = slice(max(-dy, 0), self.world.size + min(-dy, 0))
+                    xd = slice(max(-dx, 0), self.world.size + min(-dx, 0))
+                    shifted[yd, xd] = owned_a[ys, xs]
+                    grown |= shifted
+            size = self.world.size
+            for y, x in np.argwhere(np.logical_and(grown, owned_b)):
+                for dyy in (-1, 0, 1):
+                    for dxx in (-1, 0, 1):
+                        ny, nx = int(y) + dyy, int(x) + dxx
+                        if 0 <= ny < size and 0 <= nx < size:
+                            # Keys are (x, y) tile coords, matching
+                            # is_contested().
+                            self.contested[(nx, ny)] = (
+                                self.tick + CONTESTED_EXPIRY_TICKS
+                            )
+
+    def is_contested(self, x: int, y: int) -> bool:
+        return (x, y) in self.contested
+
+    def _debuff_multiplier(self, x: int, y: int) -> float:
+        mult = 1.0
+        for debuff in self.building_debuffs:
+            if debuff.active(self.tick) and debuff.x == x and debuff.y == y:
+                mult *= debuff.multiplier
+        return mult
+
+    def _raidable_targets(
+        self, attacker: Settlement
+    ) -> dict[str, list[tuple[int, int]]]:
+        """Improved tiles of hostile neighbours inside contested zones,
+        grouped by defender id."""
+        targets: dict[str, list[tuple[int, int]]] = {}
+        for neighbor in self.neighbors_of(attacker):
+            if not self.relations.is_hostile(attacker.id, neighbor.id):
+                continue
+            idx = self.settlements.index(neighbor)
+            improved = np.argwhere(
+                np.logical_and(
+                    self.world.ownership == idx,
+                    self.world.improvements != Improvement.NONE.value,
+                )
+            )
+            tiles = [
+                (int(y), int(x))
+                for y, x in improved
+                if self.is_contested(int(x), int(y))
+            ]
+            if tiles:
+                targets[neighbor.id] = tiles
+        return targets
+
+    def initiate_raid(self, attacker: Settlement) -> bool:
+        """Attempt a raid on a hostile neighbour's resource buildings.
+
+        Success: building output halved for 200 ticks + resource theft.
+        Either way relations sour. Returns True on success."""
+        import random as _random
+
+        # Cadence enforcement (defense in depth with the agent policy).
+        last = self.last_raid_tick.get(attacker.id)
+        if last is not None and self.tick - last < RAID_CADENCE_TICKS:
+            return False
+
+        targets_by_defender = self._raidable_targets(attacker)
+        if not targets_by_defender:
+            return False
+        defender_id = sorted(targets_by_defender.keys())[0]
+        defender = self.settlement_by_id(defender_id)
+        if defender is None or not defender.is_alive:
+            return False
+
+        self.last_raid_tick[attacker.id] = self.tick
+        aggression = attacker.personality.get("aggression", 0.5)
+        size_factor = min(defender.population / 100.0, 0.4)
+        success_chance = max(
+            0.2, min(0.9, 0.4 + aggression * 0.4 - size_factor)
+        )
+        rng = _random.Random(
+            (self.world.seed ^ 0x8BAD)
+            + self.tick * 7919
+            + zlib.crc32(attacker.id.encode()) % 99991
+        )
+        success = rng.random() < success_chance
+
+        self.relations.adjust(
+            attacker.id, defender.id, -RAID_ATTEMPTED_PENALTY
+        )
+        if not success:
+            self.log_event(
+                "raid",
+                [attacker.id, defender.id],
+                f"{attacker.name} raided {defender.name} and failed",
+            )
+            return False
+
+        tiles = targets_by_defender[defender_id]
+        for y, x in tiles:
+            self.building_debuffs.append(
+                BuildingDebuff(
+                    x=x,
+                    y=y,
+                    multiplier=RAID_BUILDING_DEBUFF_MULTIPLIER,
+                    expires_tick=self.tick + RAID_BUILDING_DEBUFF_TICKS,
+                    cause="raid",
+                )
+            )
+        stolen: dict[str, float] = {}
+        for resource in ("wood", "stone"):
+            available = max(defender.resource_inventory.get(resource, 0.0), 0.0)
+            take = min(float(RAID_THEFT_UNITS), available)
+            if take > 0:
+                defender.resource_inventory[resource] = available - take
+                attacker.resource_inventory[resource] = (
+                    attacker.resource_inventory.get(resource, 0.0) + take
+                )
+                stolen[resource] = round(take, 1)
+        self.relations.adjust(attacker.id, defender.id, -RAID_SUCCESS_PENALTY)
+        self.log_event(
+            "raid",
+            [attacker.id, defender.id],
+            f"{attacker.name} raided {defender.name}: output halved for "
+            f"{RAID_BUILDING_DEBUFF_TICKS} ticks, stole {stolen}",
+        )
+        return True
+
+    # ------------------------------------------------------------------
     # Tick loop
     # ------------------------------------------------------------------
 
     def food_income(self, settlement: Settlement) -> float:
-        """Terrain food yields + farm output on owned tiles."""
+        """Terrain food yields + farm output (with raid debuffs) on owned
+        tiles."""
         idx = self.settlements.index(settlement)
         owned = self.world.ownership == idx
         income = float(self.world.food_yield_grid()[owned].sum())
-        farms = np.logical_and(
-            owned, self.world.improvements == Improvement.FARM.value
+        farm_tiles = np.argwhere(
+            np.logical_and(
+                owned, self.world.improvements == Improvement.FARM.value
+            )
         )
-        income += int(farms.sum()) * BUILDING_SPECS[BuildingType.FARM].food_output
+        for y, x in farm_tiles:
+            income += (
+                BUILDING_SPECS[BuildingType.FARM].food_output
+                * self._debuff_multiplier(int(x), int(y))
+            )
         return income
 
     def food_capacity(self, settlement: Settlement) -> float:
@@ -907,21 +1188,26 @@ class Simulation:
         )
 
     def _produce_resources(self, settlement: Settlement) -> None:
-        """Add building output + passive gathering to the inventory."""
+        """Add building output (with raid debuffs) + passive gathering to the
+        inventory."""
         idx = self.settlements.index(settlement)
         owned = self.world.ownership == idx
         produced = {"wood": 0.0, "stone": 0.0, "metal": 0.0}
         for btype in BuildingType:
             imp = Improvement(btype.value + 1)
-            count = int(
-                np.logical_and(owned, self.world.improvements == imp.value).sum()
+            tiles = np.argwhere(
+                np.logical_and(
+                    owned, self.world.improvements == imp.value
+                )
             )
-            if count == 0:
+            if len(tiles) == 0:
                 continue
             spec = BUILDING_SPECS[btype]
-            produced["wood"] += spec.wood_output * count
-            produced["stone"] += spec.stone_output * count
-            produced["metal"] += spec.metal_output * count
+            for y, x in tiles:
+                mult = self._debuff_multiplier(int(x), int(y))
+                produced["wood"] += spec.wood_output * mult
+                produced["stone"] += spec.stone_output * mult
+                produced["metal"] += spec.metal_output * mult
         # Passive gathering: fraction of terrain yields on owned tiles.
         terrain_grid = self.world.terrain
         for res_name, attr in (("wood", "wood"), ("stone", "stone"), ("metal", "metal")):
@@ -954,6 +1240,14 @@ class Simulation:
     def step(self) -> None:
         """Advance the simulation by exactly one tick."""
         self.world.tick += 1
+        self._neighbors_cache.clear()
+        self.relations.decay_tick()
+        if self.tick % 50 == 0:
+            self._refresh_contested_zones()
+        # Expire building debuffs.
+        self.building_debuffs = [
+            d for d in self.building_debuffs if d.active(self.tick)
+        ]
         if self.tick % EVENT_CHECK_INTERVAL_TICKS == 0:
             self._check_disasters()
         for idx, settlement in enumerate(self.settlements):
@@ -1101,6 +1395,10 @@ def simulation_from_state(
     trade_routes: list[TradeRoute],
     ruins: list[RuinSite],
     disaster_events: list[DisasterEvent],
+    relations: RelationMatrix | None = None,
+    contested: dict | None = None,
+    building_debuffs: list[BuildingDebuff] | None = None,
+    event_log: list[WorldEvent] | None = None,
 ) -> Simulation:
     """Rebuild a Simulation from deserialized snapshot state (Sprint 6).
 
@@ -1112,6 +1410,10 @@ def simulation_from_state(
         trade_routes=trade_routes,
         disaster_events=disaster_events,
         ruins=ruins,
+        relations=relations if relations is not None else RelationMatrix(),
+        contested=contested or {},
+        building_debuffs=building_debuffs or [],
+        event_log=event_log or [],
     )
     sim.agents = [
         RuleBasedAgent(world.seed, idx) for idx in range(len(settlements))

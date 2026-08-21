@@ -18,8 +18,9 @@ from pathlib import Path
 import numpy as np
 
 from .disasters import DisasterEvent, DisasterType
+from .relations import RelationMatrix
 from .settlement import Settlement
-from .simulation import RuinSite, TradeRoute
+from .simulation import BuildingDebuff, RuinSite, TradeRoute, WorldEvent
 from .world import UNOWNED, World
 
 DEFAULT_DB_PATH = Path("data/world_sim/world.db")
@@ -108,6 +109,15 @@ CREATE TABLE IF NOT EXISTS benchmark_runs (
     wood_final REAL NOT NULL,
     stone_final REAL NOT NULL,
     created_at TEXT NOT NULL
+);
+
+-- Inter-settlement interaction log (Sprint 9).
+CREATE TABLE IF NOT EXISTS world_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    tick INTEGER NOT NULL,
+    type TEXT NOT NULL,
+    actor_ids TEXT NOT NULL,
+    description TEXT NOT NULL
 );
 """
 
@@ -234,12 +244,36 @@ def _decode_disaster(obj: dict) -> DisasterEvent:
     )
 
 
+def _encode_debuff(d: BuildingDebuff) -> dict:
+    return {
+        "x": d.x,
+        "y": d.y,
+        "multiplier": d.multiplier,
+        "expires_tick": d.expires_tick,
+        "cause": d.cause,
+    }
+
+
+def _decode_debuff(obj: dict) -> BuildingDebuff:
+    return BuildingDebuff(
+        x=obj["x"],
+        y=obj["y"],
+        multiplier=obj["multiplier"],
+        expires_tick=obj["expires_tick"],
+        cause=obj["cause"],
+    )
+
+
 def serialize_world(
     world: World,
     settlements: list[Settlement] | None = None,
     trade_routes: list[TradeRoute] | None = None,
     ruins: list[RuinSite] | None = None,
     disaster_events: list[DisasterEvent] | None = None,
+    relations: RelationMatrix | None = None,
+    contested: dict | None = None,
+    building_debuffs: list[BuildingDebuff] | None = None,
+    event_log: list[WorldEvent] | None = None,
 ) -> str:
     state = {
         "seed": world.seed,
@@ -254,13 +288,40 @@ def serialize_world(
         "trade_routes": [_encode_route(r) for r in (trade_routes or [])],
         "ruins": [_encode_ruin(r) for r in (ruins or [])],
         "disaster_events": [_encode_disaster(e) for e in (disaster_events or [])],
+        "relations": relations.to_dict() if relations else {},
+        "contested": [
+            {"x": x, "y": y, "expiry": expiry}
+            for (x, y), expiry in (contested or {}).items()
+        ],
+        "building_debuffs": [
+            _encode_debuff(d) for d in (building_debuffs or [])
+        ],
+        "event_log": [
+            {
+                "tick": e.tick,
+                "type": e.type,
+                "actor_ids": e.actor_ids,
+                "description": e.description,
+            }
+            for e in (event_log or [])
+        ],
     }
     return json.dumps(state, sort_keys=True)
 
 
 def deserialize_world(
     state_json: str,
-) -> tuple[World, list[Settlement], list[TradeRoute], list[RuinSite], list[DisasterEvent]]:
+) -> tuple[
+    World,
+    list[Settlement],
+    list[TradeRoute],
+    list[RuinSite],
+    list[DisasterEvent],
+    RelationMatrix,
+    dict,
+    list[BuildingDebuff],
+    list[WorldEvent],
+]:
     state = json.loads(state_json)
     world = World(seed=state["seed"], size=state["size"])
     world.tick = state["tick"]
@@ -281,7 +342,34 @@ def deserialize_world(
     disaster_events = [
         _decode_disaster(obj) for obj in state.get("disaster_events", [])
     ]
-    return world, settlements, trade_routes, ruins, disaster_events
+    relations = RelationMatrix.from_dict(state.get("relations", {}))
+    contested = {
+        (obj["x"], obj["y"]): obj["expiry"]
+        for obj in state.get("contested", [])
+    }
+    building_debuffs = [
+        _decode_debuff(obj) for obj in state.get("building_debuffs", [])
+    ]
+    event_log = [
+        WorldEvent(
+            tick=obj["tick"],
+            type=obj["type"],
+            actor_ids=list(obj["actor_ids"]),
+            description=obj["description"],
+        )
+        for obj in state.get("event_log", [])
+    ]
+    return (
+        world,
+        settlements,
+        trade_routes,
+        ruins,
+        disaster_events,
+        relations,
+        contested,
+        building_debuffs,
+        event_log,
+    )
 
 
 @dataclass
@@ -309,6 +397,10 @@ class WorldStore:
         trade_routes: list[TradeRoute] | None = None,
         ruins: list[RuinSite] | None = None,
         disaster_events: list[DisasterEvent] | None = None,
+        relations: RelationMatrix | None = None,
+        contested: dict | None = None,
+        building_debuffs: list[BuildingDebuff] | None = None,
+        event_log: list[WorldEvent] | None = None,
     ) -> str:
         """Insert a world row, write a snapshot, and upsert settlement,
         resource, and trade-route rows."""
@@ -326,7 +418,15 @@ class WorldStore:
                     tick,
                     world_id,
                     serialize_world(
-                        world, settlements, trade_routes, ruins, disaster_events
+                        world,
+                        settlements,
+                        trade_routes,
+                        ruins,
+                        disaster_events,
+                        relations,
+                        contested,
+                        building_debuffs,
+                        event_log,
                     ),
                 ),
             )
@@ -383,6 +483,10 @@ class WorldStore:
         list[TradeRoute],
         list[RuinSite],
         list[DisasterEvent],
+        RelationMatrix,
+        dict,
+        list[BuildingDebuff],
+        list[WorldEvent],
     ]:
         row = self._conn.execute(
             "SELECT state_json FROM snapshots WHERE world_id = ? "
@@ -392,6 +496,20 @@ class WorldStore:
         if row is None:
             raise ValueError(f"No snapshot found for world {world_id}")
         return deserialize_world(row[0])
+
+    def insert_world_events(self, events: list[WorldEvent]) -> int:
+        if not events:
+            return 0
+        with self._conn:
+            self._conn.executemany(
+                "INSERT INTO world_events (tick, type, actor_ids, description) "
+                "VALUES (?, ?, ?, ?)",
+                [
+                    (e.tick, e.type, ",".join(e.actor_ids), e.description)
+                    for e in events
+                ],
+            )
+        return len(events)
 
     def world_exists(self, world_id: str) -> bool:
         row = self._conn.execute(
@@ -407,11 +525,24 @@ class WorldStore:
         trade_routes: list[TradeRoute] | None = None,
         ruins: list[RuinSite] | None = None,
         disaster_events: list[DisasterEvent] | None = None,
+        relations: RelationMatrix | None = None,
+        contested: dict | None = None,
+        building_debuffs: list[BuildingDebuff] | None = None,
+        event_log: list[WorldEvent] | None = None,
     ) -> str:
         """Save under a caller-chosen id (upsert)."""
         if self.world_exists(world_id):
             self.update_world(
-                world_id, world, settlements, trade_routes, ruins, disaster_events
+                world_id,
+                world,
+                settlements,
+                trade_routes=trade_routes,
+                ruins=ruins,
+                disaster_events=disaster_events,
+                relations=relations,
+                contested=contested,
+                building_debuffs=building_debuffs,
+                event_log=event_log,
             )
             return world_id
         created_at = datetime.now(timezone.utc).isoformat()
@@ -425,7 +556,17 @@ class WorldStore:
                 (
                     world.tick,
                     world_id,
-                    serialize_world(world, settlements, trade_routes, ruins, disaster_events),
+                    serialize_world(
+                        world,
+                        settlements,
+                        trade_routes,
+                        ruins,
+                        disaster_events,
+                        relations,
+                        contested,
+                        building_debuffs,
+                        event_log,
+                    ),
                 ),
             )
             for s in settlements or []:
@@ -474,6 +615,10 @@ class WorldStore:
         trade_routes: list[TradeRoute] | None = None,
         ruins: list[RuinSite] | None = None,
         disaster_events: list[DisasterEvent] | None = None,
+        relations: RelationMatrix | None = None,
+        contested: dict | None = None,
+        building_debuffs: list[BuildingDebuff] | None = None,
+        event_log: list[WorldEvent] | None = None,
     ) -> None:
         """Write a new snapshot for an existing world and bump last_tick."""
         if not self.world_exists(world_id):
@@ -490,7 +635,15 @@ class WorldStore:
                     world.tick,
                     world_id,
                     serialize_world(
-                        world, settlements, trade_routes, ruins, disaster_events
+                        world,
+                        settlements,
+                        trade_routes,
+                        ruins,
+                        disaster_events,
+                        relations,
+                        contested,
+                        building_debuffs,
+                        event_log,
                     ),
                 ),
             )

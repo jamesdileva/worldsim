@@ -29,6 +29,10 @@ CLAIM_INTERVAL_TICKS = 24
 ROAD_INTERVAL_TICKS = 12
 TRADE_INTERVAL_TICKS = 24
 
+# Raids (Sprint 9): aggressive personalities only, hostile relations only.
+RAID_CADENCE_TICKS = 200
+RAID_AGGRESSION_GATE = 0.7
+
 
 def observe_vector(sim, settlement: Settlement) -> np.ndarray:
     """Build the 60-dim normalized observation for one settlement."""
@@ -106,7 +110,22 @@ def observe_vector(sim, settlement: Settlement) -> np.ndarray:
     obs[30] = clamp01(droughts / 3.0)
     obs[31] = 1.0 if sim._ruin_adjacent(settlement) else 0.0
 
-    # 32-47: reserved (military, research, diplomacy) — wired in later sprints.
+    # 32-37: reserved military.
+    # Sprint 9 diplomacy dims:
+    hostile_neighbors = sum(
+        1
+        for n in sim.neighbors_of(settlement)
+        if sim.relations.is_hostile(settlement.id, n.id)
+    )
+    friendly_neighbors = sum(
+        1
+        for n in sim.neighbors_of(settlement)
+        if sim.relations.is_friendly(settlement.id, n.id)
+    )
+    obs[42] = clamp01(hostile_neighbors / 5.0)
+    obs[43] = clamp01(friendly_neighbors / 5.0)
+    obs[44] = clamp01(len(sim.contested) / 500.0)
+    # 45-47: reserved research/diplomacy detail.
 
     # --- World-level aggregates ---------------------------------------
     obs[48] = clamp01(sum(1 for s in sim.settlements if s.is_alive) / 20.0)
@@ -245,6 +264,16 @@ class RuleBasedAgent(Agent):
             return int(Action.EXPAND_ROAD_NETWORK)
         if self.call_count % trade_interval == 10:
             return int(Action.ESTABLISH_TRADE_ROUTE)
+
+        # --- Urgency 3.5: raids (aggressive, at war, on cadence) ----------
+        aggression = p.get("aggression", 0.5)
+        hostile_neighbors = float(obs[42])
+        if (
+            aggression > RAID_AGGRESSION_GATE
+            and hostile_neighbors > 0.0
+            and self.call_count % RAID_CADENCE_TICKS == 15
+        ):
+            return int(Action.INITIATE_RAID)
 
         # --- Urgency 4: resource income (sub-cadence gated) --------------
         if wood < stockpile_floor and has_farm and can_sawmill and self.call_count % 8 == 2:
