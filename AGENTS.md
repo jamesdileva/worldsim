@@ -20,10 +20,10 @@ emergent strategies — all reproducible from a single seed.
 **Stack:** Python + NumPy + opensimplex + SQLite + Gymnasium +
 Stable-Baselines3 (PPO) + matplotlib + psutil + scipy.
 
-**Status:** Phase 1 ✅ (Milestone 1 "Living Ant Farm"), Phase 2 ✅
-(specialization/emergence), Phase 3 in progress (Sprint 18 done + learning
-remediation: controlled cohort healthy, no regressions; eval metrics still
-saturated).
+**Status:** Phase 1 ✅, Phase 2 ✅, Phase 3 ✅ (Sprints 12–18 + remediation;
+learning healthy in training metrics, eval metrics saturated), **Phase 4 in
+progress** (Sprint 19 done: populations + generational training; sprint docs
+expanded through Phase 10).
 
 **Test tiers:** `pytest` = fast suite (~250 tests, ~3–5 min);
 `pytest -m slow` = long integration runs.
@@ -55,6 +55,7 @@ saturated).
 | `923cb40` | 17 | Difficulty knobs, shared reward measurement, Wilcoxon/permutation significance, evaluation reports |
 | `ab780ec` | 18 | Multi-generation dashboard, learning curves, per-seed regression detection |
 | `44e34d1` | 18b | Learning remediation: entropy capture fix, configurable reward weights, controlled retraining (no regressions) |
+| `0a9f070` | 19 | Population manager, champion selection/promotion, lineage; sprint docs expanded through Phase 10 (**Phase 4 begins**) |
 
 ---
 
@@ -158,6 +159,26 @@ Agents replace auto-rules; the frozen RL contract is born
 - Remaining gap: eval metrics (survival/peak-pop) still saturate at food-
   carrying equilibrium; eval-visible improvement needs harder worlds or
   efficiency-style metrics at longer horizons.
+
+### Session 21 — Sprint 19 (this session)
+- `detailed_sprint_plan.md` expanded through Phase 10 from the roadmap,
+  reconciled with reality: strategy memory/hacking-detection/dashboards/
+  God Mode core landed early; Phase 4 sprints carry full detail, Phases 5–7
+  as themed tables pending scoping.
+- **[WHY] Docs reconciled rather than copied**: several roadmap items shipped
+  ahead of their slots — the plan must reflect what's actually missing or
+  sprints would rebuild existing systems.
+- `population.py`: N candidates per generation on disjoint seeds, champion
+  by mean training return (deterministic tie-break), promoted to the bare
+  generation label so all existing tools work unchanged; lineage via new
+  `parent` column.
+- **[WHY] Selection on training return for now**: validation-world selection
+  deferred to Sprint 20; training return is free (no extra rollouts).
+- Verified end-to-end: gen1→gen2 champion chain with parent lineage.
+
+---
+
+## Conventions
 
 ---
 
