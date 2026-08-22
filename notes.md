@@ -5,6 +5,143 @@ Decisions worth remembering are marked **[DECISION]**.
 
 ---
 
+## Session 13 — 2026-08-20 — Pre-Phase-3 Hygiene + Sprint 12: ML Environment
+
+**Scope:** Test split + profiling (queued from Session 11), then Phase 3 /
+Sprint 12 — `WorldSimEnv(gym.Env)`, §6.4 reward, headless runner.
+
+### Part 1 — Hygiene
+
+**Test split:** `slow` marker registered in pyproject; default run excludes
+it (`addopts = "-m 'not slow'"`). 12 long tests marked. Fast suite:
+**203 tests in ~2 min**; slow tier: `pytest -m slow` (12 tests, ~3 min).
+
+**Profiling** (cProfile, 5 settlements × 300 ticks; total 9.0s → 6.4s,
+step-loop **2× faster**):
+1. World generation was 33% of profile → module-level `(seed, size)`
+   generation cache in `world.py` (arrays copied out; capped at 64 entries).
+2. Full-grid scans repeated per settlement-tick (`buildings_of` ×4,
+   `territory_of`, `roads_of`) → per-tick memo (`Simulation._cached`) with
+   invalidation at every mutation point.
+3. `_produce_resources` redundant masks/per-tile loops → bincounts with a
+   no-debuff fast path.
+- Gotcha: cache invalidation initially missed `build_road` — roads were
+  built but invisible until next tick. Every mutator must invalidate;
+  consider a decorator if more mutators appear.
+
+### Part 2 — Sprint 12: WorldSimEnv
+
+- `env.py` — `WorldSimEnv(gym.Env)` exposing ONE settlement's perspective:
+  - `reset(seed)` → fresh world/settlements, returns the frozen-contract
+    observation `(60,) float32`
+  - `step(action)` → executes the GIVEN action for the controlled settlement
+    (its rule-based agent is skipped that tick via
+    `Simulation.step(skip_agent_ids=...)`); other settlements continue under
+    rule-based control
+  - spaces: `Discrete(62)` / `Box(0,1,(60,),float32)`
+  - termination: controlled settlement dies or all die; truncation at
+    max_ticks (default 5000)
+- Reward per §6.4 shape, normalized [-1,+1]: survival bonus, population
+  gain/loss, building/route deltas, starving penalty
+- CLI: `worldsim rl run --episodes N --ticks T --settlements S` — random-
+  policy headless episode runner printing returns/lengths/survivors
+- gymnasium added to dependencies
+- Tests: 17 new env tests (spaces, reset reproducibility, step tuple,
+  agent-skip semantics, truncation/termination, reward unit tests incl.
+  clamping, trajectory determinism). Fast suite: 203 passing.
+
+### Decisions
+
+- **[DECISION] Single-settlement perspective**: the env controls one
+  settlement; the rest of the world lives on under rule-based agents. This
+  gives PPO a stationary-ish multi-agent backdrop without self-play
+  complexity (self-play arrives in Phase 4).
+- **[DECISION] Reward scale**: weights chosen so a normal tick lands around
+  ±0.05 and disasters matter (~0.2+); clamped to [-1,1]. The formal
+  normalization/rolling-average machinery from §6.4/Sprint 13 will refine.
+- **[DECISION] Agent-skip via `step(skip_agent_ids)`**: mechanics
+  (production/consumption/population/diplomacy) still run for the controlled
+  settlement — only its DECISION is external.
+
+### Gotchas / bugs found & fixed
+
+- Reward sign error: population LOSS added +0.2 instead of subtracting —
+  dying was profitable! Caught by the loss-dominates unit test before any
+  training happened. Exactly the class of bug reward-unit-tests exist for.
+
+### Acceptance criteria status
+
+- ✅ `env.reset()` returns valid observation + info dict
+- ✅ `env.step(action)` returns correct `(obs, reward, terminated, truncated,
+  info)`
+- ✅ Reward within [-1, +1], normalized per tick
+- ✅ Headless mode runs episodes (random policy smoke: 3×300 ticks in seconds)
+- ✅ Reward function unit-tested for known scenarios
+- (100-episode perf criterion deferred to Sprint 14 when PPO lands)
+
+### Next up (Sprint 13)
+
+Reward system refinement: reward shaping (redundant-action penalties),
+rolling normalization, replay buffer (10k RAM + SQLite flush), reward
+hacking detection flags, reward breakdown logging/visualization.
+
+---
+
+## Session 12 — 2026-08-20 — Pre-Phase-3 Hygiene: Test Split + Profiling
+
+**Scope:** Split slow integration tests (suite had grown to ~15 min) and
+profile/optimize hot paths before Phase 3's training loops.
+
+### What was done
+
+**Test split**
+- `pyproject.toml`: `slow` marker registered; default run excludes it
+  (`addopts = "-m 'not slow'"`)
+- 12 long-running tests marked `@pytest.mark.slow` (long survival runs,
+  multi-hundred-tick determinism checks, benchmark CLI test)
+- Fast suite (`pytest`): **186 tests in ~2 min** (was ~15 min)
+- Slow suite (`pytest -m slow`): 12 tests in ~3 min
+- Full coverage still exists — CI/dev loop uses fast, pre-release uses both
+
+**Profiling + optimization** (cProfile, 5 settlements × 300 ticks; 9.0s → 6.4s,
+with step-loop 6.0s → 3.2s ≈ **2× faster ticks**)
+1. World generation was 33% of profile (opensimplex pure-Python loops):
+   added a module-level `(seed, size)` generation cache in `world.py`
+   (arrays copied out so sim mutations never poison the cache). Massive win
+   for test suites/benchmarks that reuse seeds.
+2. `observe_vector` called `buildings_of`/`territory_of`/`roads_of`
+   repeatedly per settlement-tick, each doing full-grid scans: added a
+   per-tick memo (`Simulation._cached`) keyed by settlement index, cleared at
+   tick start and invalidated on every world mutation (claim/release/build/
+   destroy/fire).
+3. `_produce_resources` did redundant full-grid masks per resource and
+   per-tile debuff loops: vectorized via bincounts with a no-debuff fast
+   path.
+
+### Gotchas / bugs found & fixed
+
+- The cache initially missed invalidation in `build_road` (only `build_at`
+  got it) — roads built but invisible to `roads_of` until next tick. Caught
+  by `test_auto_road_rule_extends_network`; lesson: every mutator needs the
+  invalidation call, consider a decorator later.
+
+### Decisions
+
+- **[DECISION] Default pytest run = fast suite only**; slow tier is explicit
+  (`pytest -m slow`). Command-line `-m` overrides addopts cleanly.
+- **[DECISION] Per-tick cache with mutation-point invalidation** rather than
+  tick-lazy staleness — semantics stay exact, determinism unaffected.
+- opensimplex generation itself (~3 s cold) left as-is: amortized in long
+  runs; revisit with Numba only if world-gen shows up in training profiles.
+
+### Next up (Sprint 12)
+
+Phase 3 begins: Gymnasium environment wrapping the engine
+(`WorldSimEnv(gym.Env)`), observation/action mapping to the frozen contract,
+reward function, headless runner, unit tests for vectorization/rewards.
+
+---
+
 ## Session 11 — 2026-08-20 — Sprint 11: Emergent Specialization & Strategy Differentiation (Phase 2 complete!)
 
 **Scope:** Phase 2 / Sprint 11 — five archetypes biasing behavior, emergent

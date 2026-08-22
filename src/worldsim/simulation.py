@@ -1453,8 +1453,12 @@ class Simulation:
                 route.active = False
         return ruin
 
-    def step(self) -> None:
-        """Advance the simulation by exactly one tick."""
+    def step(self, skip_agent_ids: set[str] | None = None) -> None:
+        """Advance the simulation by exactly one tick.
+
+        Settlements listed in skip_agent_ids still produce/consume/populate
+        but skip their agent decision this tick (used by the RL environment,
+        which supplies the action externally)."""
         self.world.tick += 1
         self._neighbors_cache.clear()
         self.relations.decay_tick()
@@ -1469,12 +1473,13 @@ class Simulation:
         ]
         if self.tick % EVENT_CHECK_INTERVAL_TICKS == 0:
             self._check_disasters()
+        skip = skip_agent_ids or set()
         for idx, settlement in enumerate(self.settlements):
             if not settlement.is_alive:
                 continue
             # --- Agent decision cycle (Sprint 7) -----------------------
             agent = self.agents[idx] if idx < len(self.agents) else None
-            if agent is not None:
+            if agent is not None and settlement.id not in skip:
                 obs_now = agent.observe(self, settlement)
                 self._finalize_transition(settlement, obs_now)
                 action_id = agent.decide(obs_now)

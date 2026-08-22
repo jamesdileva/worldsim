@@ -154,6 +154,19 @@ def build_parser() -> argparse.ArgumentParser:
     bench.add_argument(
         "--db", default=str(DEFAULT_DB_PATH), help="SQLite database path"
     )
+
+    rl = sub.add_parser(
+        "rl",
+        help="RL utilities (headless episode runs over WorldSimEnv)",
+    )
+    rl_sub = rl.add_subparsers(dest="rl_command", required=True)
+    run = rl_sub.add_parser("run", help="Run headless episodes")
+    run.add_argument("--episodes", type=int, default=10, help="Episodes to run")
+    run.add_argument("--seed", type=int, default=42, help="Base seed")
+    run.add_argument("--ticks", type=int, default=1000, help="Max ticks per episode")
+    run.add_argument(
+        "--settlements", type=int, default=5, help="Settlements per world"
+    )
     return parser
 
 
@@ -579,6 +592,47 @@ def cmd_benchmark(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_rl(args: argparse.Namespace) -> int:
+    """Headless episode runner over WorldSimEnv with a random policy."""
+    import numpy as np
+
+    from .env import WorldSimEnv
+
+    env = WorldSimEnv(seed=args.seed, num_settlements=args.settlements,
+                      max_ticks=args.ticks)
+    totals = []
+    lengths = []
+    survivors = 0
+    for episode in range(args.episodes):
+        obs, info = env.reset(seed=args.seed + episode)
+        done = False
+        total = 0.0
+        steps = 0
+        rng = np.random.default_rng(args.seed + episode)
+        while not done:
+            action = int(env.action_space.sample())
+            obs, reward, terminated, truncated, info = env.step(action)
+            total += reward
+            steps += 1
+            done = terminated or truncated
+        totals.append(total)
+        lengths.append(steps)
+        alive = sum(1 for s in env.sim.settlements if s.is_alive)
+        survivors += 1 if alive > 0 else 0
+        print(
+            f"  episode {episode}: seed={args.seed + episode} "
+            f"steps={steps} return={total:.2f} "
+            f"final pop={info['population']}"
+        )
+    print(
+        f"\n{args.episodes} episodes | mean return "
+        f"{sum(totals) / len(totals):.2f} | mean length "
+        f"{sum(lengths) / len(lengths):.0f} ticks | worlds surviving: "
+        f"{survivors}/{args.episodes}"
+    )
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     handlers = {
@@ -590,6 +644,7 @@ def main(argv: list[str] | None = None) -> int:
         "god": cmd_god,
         "events": cmd_events,
         "benchmark": cmd_benchmark,
+        "rl": cmd_rl,
     }
     return handlers[args.command](args)
 
