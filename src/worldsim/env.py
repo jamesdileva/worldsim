@@ -1,12 +1,13 @@
-"""Gymnasium environment wrapping the simulation engine (Sprint 12, Phase 3).
+"""Gymnasium environment wrapping the simulation engine (Sprint 12-13).
 
 The env exposes ONE settlement's perspective: `step(action)` executes the
 given action for the controlled settlement while all other settlements
 continue under their rule-based agents. This is the interface PPO will train
 against in Sprint 14.
 
-Reward follows docs/architecture_detailed.md §6.4, normalized to [-1, +1]
-per tick.
+Reward follows docs/architecture_detailed.md §6.4 as named components
+(Sprint 13), normalized to [-1, +1] per tick, with breakdown/normalized
+values and reward-hacking flags exposed through `info`.
 """
 
 from __future__ import annotations
@@ -18,39 +19,19 @@ import numpy as np
 
 from .actions import NUM_ACTIONS
 from .agents import OBSERVATION_DIM, observe_vector
+from .rewards import (
+    RewardHackingDetector,
+    RollingNormalizer,
+    compute_reward_components,
+    total_of,
+)
+from .replay import ReplayBuffer
 from .settlement import Settlement
 from .simulation import Simulation
 from .world import World
 
 MAX_EPISODE_TICKS = 5000
-
-# §6.4 reward weights, scaled so a typical tick lands well inside [-1, 1].
-REWARD_POPULATION_GAIN = 0.02
-REWARD_POPULATION_LOSS = 0.2
-REWARD_SURVIVAL_PER_TICK = 0.001
-REWARD_BUILDING_DELTA = 0.05
-REWARD_ROUTE_DELTA = 0.1
-PENALTY_STARVING_TICK = 0.02
-
-
-def compute_reward(
-    prev_population: int,
-    now: Settlement,
-    building_delta: int,
-    route_delta: int,
-) -> float:
-    """§6.4-shaped reward for one tick, clamped to [-1, +1]."""
-    reward = REWARD_SURVIVAL_PER_TICK
-    pop_delta = now.population - prev_population
-    if pop_delta > 0:
-        reward += REWARD_POPULATION_GAIN * pop_delta
-    elif pop_delta < 0:
-        reward -= REWARD_POPULATION_LOSS * abs(pop_delta)
-    reward += REWARD_BUILDING_DELTA * max(0, building_delta)
-    reward += REWARD_ROUTE_DELTA * max(0, route_delta)
-    if now.food_stock <= 0 and now.starvation_progress > 10:
-        reward -= PENALTY_STARVING_TICK
-    return float(max(-1.0, min(1.0, reward)))
+REDUNDANT_ACTION_WINDOW = 5
 
 
 @dataclass
@@ -79,6 +60,7 @@ class WorldSimEnv(gym.Env):
         size: int = 256,
         num_settlements: int = 5,
         max_ticks: int = MAX_EPISODE_TICKS,
+        replay_capacity: int = 10_000,
     ) -> None:
         super().__init__()
         self.seed_value = seed
@@ -91,9 +73,19 @@ class WorldSimEnv(gym.Env):
             low=0.0, high=1.0, shape=(OBSERVATION_DIM,), dtype=np.float32
         )
 
+        # Sprint 13: reward refinement machinery.
+        self.replay_buffer = ReplayBuffer(capacity=replay_capacity, seed=seed)
+        self.normalizer = RollingNormalizer()
+        self.hacking_detector = RewardHackingDetector()
+        self.reward_history: list[float] = []
+        self._last_action: int | None = None
+        self._repeat_count = 0
+        self._obs: np.ndarray | None = None
+
         self.sim: Simulation | None = None
         self.controlled: Settlement | None = None
         self._prev: SettlementSnapshot | None = None
+        self._prev_population: int = 0
 
     def _reset_sim(self) -> None:
         world = World(seed=self.seed_value, size=self.size)
@@ -109,9 +101,16 @@ class WorldSimEnv(gym.Env):
         self._reset_sim()
         assert self.sim is not None and self.controlled is not None
         obs = observe_vector(self.sim, self.controlled).astype(np.float32)
+        self._obs = obs
         self._prev = snapshot(
             self.controlled, sum(self.sim.buildings_of(self.controlled).values())
         )
+        self._prev_population = self.controlled.population
+        self.normalizer = RollingNormalizer()
+        self.hacking_detector = RewardHackingDetector()
+        self.reward_history.clear()
+        self._last_action = None
+        self._repeat_count = 0
         info = {
             "settlement_id": self.controlled.id,
             "settlement_name": self.controlled.name,
@@ -121,33 +120,59 @@ class WorldSimEnv(gym.Env):
     def step(self, action: int):
         assert self.sim is not None and self.controlled is not None
         assert self._prev is not None
+        action = int(action)
 
-        # The controlled settlement executes the GIVEN action this tick; its
-        # own rule-based agent decision is skipped for it.
+        # Redundant-action shaping (Sprint 13).
+        if action == self._last_action:
+            self._repeat_count += 1
+        else:
+            self._repeat_count = 0
+        self._last_action = action
+
         buildings_before_action = sum(
             self.sim.buildings_of(self.controlled).values()
         )
         routes_before = self.controlled.routes_established
-        self.sim.execute_action(self.controlled, int(action))
+        executed = self.sim.execute_action(self.controlled, action)
 
+        prev_population = self._prev_population
         self.sim.step(skip_agent_ids={self.controlled.id})
 
         now_buildings = sum(self.sim.buildings_of(self.controlled).values())
-        reward = compute_reward(
-            self._prev.population,
-            self.controlled,
+        components = compute_reward_components(
+            prev_population=prev_population,
+            population=self.controlled.population,
             building_delta=now_buildings - buildings_before_action,
             route_delta=self.controlled.routes_established - routes_before,
+            food_stock=self.controlled.food_stock,
+            starvation_progress=self.controlled.starvation_progress,
+            repeated_action_count=self._repeat_count,
+            action_executed=executed,
         )
+        reward = float(max(-1.0, min(1.0, total_of(components))))
+        self.normalizer.record(reward)
+        self.reward_history.append(reward)
+        flagged = self.hacking_detector.record(self.sim.tick, components)
         self._prev = snapshot(self.controlled, now_buildings)
+        self._prev_population = self.controlled.population
 
         terminated = not self.controlled.is_alive or not any(
             s.is_alive for s in self.sim.settlements
         )
         truncated = self.sim.tick >= self.max_ticks and not terminated
-        obs = observe_vector(self.sim, self.controlled).astype(np.float32)
+        next_obs = observe_vector(self.sim, self.controlled).astype(np.float32)
+
+        # Sprint 13: replay buffer captures every transition.
+        prev_obs = self._obs if self._obs is not None else next_obs
+        self.replay_buffer.add(prev_obs, action, reward, next_obs, terminated)
+        self._obs = next_obs
+
         info = {
             "tick": self.sim.tick,
             "population": self.controlled.population,
+            "reward_breakdown": dict(components),
+            "reward_normalized": self.normalizer.normalize(reward),
+            "hacking_flag": flagged,
+            "hacking_source": self.hacking_detector.dominant_source(),
         }
-        return obs, float(reward), bool(terminated), bool(truncated), info
+        return next_obs, reward, bool(terminated), bool(truncated), info

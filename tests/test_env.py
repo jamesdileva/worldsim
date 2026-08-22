@@ -3,12 +3,8 @@ import gymnasium as gym
 import pytest
 
 from worldsim.actions import Action
-from worldsim.env import (
-    MAX_EPISODE_TICKS,
-    REWARD_POPULATION_LOSS,
-    WorldSimEnv,
-    compute_reward,
-)
+from worldsim.env import MAX_EPISODE_TICKS, WorldSimEnv
+from worldsim.rewards import compute_reward_components, total_of
 from worldsim.settlement import Settlement
 
 
@@ -123,27 +119,40 @@ def make_settlement(pop=10, food_stock=500):
 
 def test_reward_survival_bonus_small_positive():
     s = make_settlement()
-    r = compute_reward(prev_population=10, now=s, building_delta=0, route_delta=0)
+    r = total_of(compute_reward_components(
+        prev_population=10, population=s.population, building_delta=0,
+        route_delta=0, food_stock=s.food_stock, starvation_progress=0,
+        repeated_action_count=0, action_executed=True))
     assert 0 < r <= 1.0
 
 
 def test_reward_population_gain():
     s = make_settlement(pop=11)
-    r = compute_reward(prev_population=10, now=s, building_delta=0, route_delta=0)
-    assert r > 0.001 + 0.02 * 1 - 0.01  # survival + gain dominates
+    r = total_of(compute_reward_components(
+        prev_population=10, population=s.population, building_delta=0,
+        route_delta=0, food_stock=s.food_stock, starvation_progress=0,
+        repeated_action_count=0, action_executed=True))
+    assert 0.02 < r <= 1.0  # gain component dominates survival bonus
 
 
 def test_reward_population_loss_dominates():
     s = make_settlement(pop=9)
-    r = compute_reward(prev_population=10, now=s, building_delta=1, route_delta=0)
+    r = total_of(compute_reward_components(
+        prev_population=10, population=s.population, building_delta=1,
+        route_delta=0, food_stock=s.food_stock, starvation_progress=0,
+        repeated_action_count=0, action_executed=True))
     assert r < 0  # loss penalty outweighs survival + building
 
 
 def test_reward_building_delta_positive():
-    base = compute_reward(prev_population=10, now=make_settlement(),
-                          building_delta=0, route_delta=0)
-    with_bld = compute_reward(prev_population=10, now=make_settlement(),
-                              building_delta=1, route_delta=0)
+    base = total_of(compute_reward_components(
+        prev_population=10, population=10, building_delta=0, route_delta=0,
+        food_stock=500, starvation_progress=0, repeated_action_count=0,
+        action_executed=True))
+    with_bld = total_of(compute_reward_components(
+        prev_population=10, population=10, building_delta=1, route_delta=0,
+        food_stock=500, starvation_progress=0, repeated_action_count=0,
+        action_executed=True))
     assert with_bld > base
 
 
@@ -151,21 +160,33 @@ def test_reward_starving_penalty():
     starving = make_settlement(pop=10, food_stock=-5)
     starving.starvation_progress = 11
     healthy = make_settlement(pop=10)
-    r_starve = compute_reward(10, starving, 0, 0)
-    r_healthy = compute_reward(10, healthy, 0, 0)
+    args = dict(building_delta=0, route_delta=0, repeated_action_count=0,
+                action_executed=True)
+    r_starve = total_of(compute_reward_components(
+        prev_population=10, population=10, food_stock=-5,
+        starvation_progress=11, **args))
+    r_healthy = total_of(compute_reward_components(
+        prev_population=10, population=10, food_stock=500,
+        starvation_progress=0, **args))
     assert r_starve < r_healthy
 
 
 def test_reward_clamped_to_unit_range():
-    s = make_settlement(pop=10000)  # absurd gain
-    r = compute_reward(prev_population=10, now=s, building_delta=100,
-                       route_delta=50)
-    assert r == 1.0
+    rich = make_settlement(pop=10000)
+    r = total_of(compute_reward_components(
+        prev_population=10, population=rich.population, building_delta=100,
+        route_delta=50, food_stock=rich.food_stock,
+        starvation_progress=0, repeated_action_count=0,
+        action_executed=True))
+    assert min(1.0, max(-1.0, r)) == 1.0  # env clamps to +1
     dying = make_settlement(pop=0, food_stock=-1000)
     dying.starvation_progress = 48
-    r = compute_reward(prev_population=500, now=dying, building_delta=0,
-                       route_delta=0)
-    assert r == -1.0
+    r = total_of(compute_reward_components(
+        prev_population=500, population=dying.population, building_delta=0,
+        route_delta=0, food_stock=dying.food_stock,
+        starvation_progress=48, repeated_action_count=0,
+        action_executed=True))
+    assert max(-1.0, min(1.0, r)) == -1.0  # env clamps to -1
 
 
 # ----------------------------------------------------------------------

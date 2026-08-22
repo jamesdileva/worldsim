@@ -11,6 +11,7 @@ dependencies = [
     "numpy>=1.26",
     "opensimplex>=0.4.5",
     "gymnasium>=0.29",
+    "matplotlib>=3.8",
 ]
 
 [project.optional-dependencies]

@@ -167,6 +167,11 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument(
         "--settlements", type=int, default=5, help="Settlements per world"
     )
+    run.add_argument(
+        "--plot",
+        default=None,
+        help="Optional output .png path for a reward-over-time plot",
+    )
     return parser
 
 
@@ -603,20 +608,30 @@ def cmd_rl(args: argparse.Namespace) -> int:
     totals = []
     lengths = []
     survivors = 0
+    episode_curves: list[list[float]] = []
+    breakdown_totals: dict[str, float] = {}
+    hacking_ticks = 0
     for episode in range(args.episodes):
         obs, info = env.reset(seed=args.seed + episode)
         done = False
         total = 0.0
         steps = 0
+        curve: list[float] = []
         rng = np.random.default_rng(args.seed + episode)
         while not done:
             action = int(env.action_space.sample())
             obs, reward, terminated, truncated, info = env.step(action)
             total += reward
             steps += 1
+            curve.append(reward)
+            for name, value in info["reward_breakdown"].items():
+                breakdown_totals[name] = breakdown_totals.get(name, 0.0) + value
+            if info["hacking_flag"]:
+                hacking_ticks += 1
             done = terminated or truncated
         totals.append(total)
         lengths.append(steps)
+        episode_curves.append(curve)
         alive = sum(1 for s in env.sim.settlements if s.is_alive)
         survivors += 1 if alive > 0 else 0
         print(
@@ -630,6 +645,28 @@ def cmd_rl(args: argparse.Namespace) -> int:
         f"{sum(lengths) / len(lengths):.0f} ticks | worlds surviving: "
         f"{survivors}/{args.episodes}"
     )
+    print("reward breakdown totals:")
+    for name, value in sorted(breakdown_totals.items(), key=lambda kv: -kv[1]):
+        print(f"  {name:<20} {value:>10.2f}")
+    if hacking_ticks:
+        print(f"reward-hacking flags raised on {hacking_ticks} ticks")
+    if args.plot:
+        import matplotlib
+
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+
+        fig, ax = plt.subplots(figsize=(10, 5))
+        for i, curve in enumerate(episode_curves):
+            ax.plot(range(1, len(curve) + 1), curve, label=f"ep {i}", alpha=0.7)
+        ax.set_xlabel("tick")
+        ax.set_ylabel("reward")
+        ax.set_title("Reward per tick — benchmark episodes")
+        ax.legend(loc="upper right", fontsize=8)
+        fig.tight_layout()
+        fig.savefig(args.plot, dpi=120)
+        plt.close(fig)
+        print(f"reward plot written to {args.plot}")
     return 0
 
 

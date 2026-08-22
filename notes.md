@@ -5,6 +5,82 @@ Decisions worth remembering are marked **[DECISION]**.
 
 ---
 
+## Session 14 — 2026-08-20 — Sprint 13: Reward Refinement, Replay Buffer, Hacking Detection
+
+**Scope:** Phase 3 / Sprint 13 — named reward components, rolling
+normalization, RAM replay buffer, reward-hacking detection, breakdown
+logging + reward plots.
+
+### What was built
+
+- `rewards.py` —
+  - `compute_reward_components()`: named per-tick components {survival,
+    population, buildings, routes, starvation, redundant_action,
+    effective_action}; env's scalar reward is their clamped sum
+  - `RollingNormalizer`: rolling mean/std over last 1000 ticks; identity
+    until warmed up (50 ticks)
+  - `RewardHackingDetector`: sliding window of breakdowns; flags when any
+    single component exceeds 80% of total earned reward after a 200-tick
+    track record; exposes `dominant_source()`
+- `replay.py` — `ReplayBuffer(10_000)` ring buffer with add/sample/latest;
+  env appends every transition automatically
+- Shaping: redundant-action penalty (5+ consecutive identical actions,
+  escalating, capped) + effective-action bonus (+0.005 when the action
+  actually executes)
+- `env.py` — step now returns breakdown in `info["reward_breakdown"]`,
+  plus `reward_normalized` (info-only), `hacking_flag`, `hacking_source`
+- CLI — `rl run` prints aggregate reward-breakdown totals + hacking flag
+  count; `--plot out.png` renders per-tick reward curves (matplotlib dep)
+- Tests: 219 fast-suite passing (16 new)
+
+### Decisions
+
+- **[DECISION] Normalized reward is info-only** — the env's returned reward
+  stays raw so PPO sees true signal; normalization is exposed for analysis.
+- **[DECISION] "Efficient combos" implemented as an effectiveness bonus**:
+  multi-action combos don't exist yet, so the bonus rewards actions that
+  actually execute on first attempt vs wasted ones.
+- **[DECISION] Epsilon-style exploration excluded from hacking judgment**:
+  the detector watches component SHARES over a window, not action choice —
+  random-policy runs don't trigger it (verified: 0 flags in random smoke).
+- **[DECISION] Redundant-action penalty escalates but caps** at 10× base so
+  a stuck agent isn't infinitely punished.
+- **[DECISION] matplotlib added to main dependencies** (plot is a spec'd
+  deliverable; Agg backend, no display needed).
+
+### Gotchas / bugs found & fixed
+
+- Reward unit tests broke during the components refactor (scalar
+  `compute_reward` moved out of env.py) — rewritten against
+  `compute_reward_components` + `total_of`.
+- Replay ring test asserted on `latest(1)` (the NEWEST item) instead of the
+  eviction boundary — fixed to inspect the full tail window.
+
+### Known issues / deferred
+
+- Reward plot currently shows random-policy curves (no learning yet);
+  "clear learning curve" verification lands in Sprint 14/18 when PPO trains.
+- Hacking detector only observes the controlled settlement (single-agent env).
+- SQLite experience archive (`agent_history`) and the RAM replay buffer are
+  separate by design; unifying them is deferred until PPO dictates format.
+
+### Acceptance criteria status
+
+- ✅ Reward breakdown logged per tick in info dict (named components)
+- ✅ Replay buffer stores 10k transitions (ring semantics verified)
+- ✅ Hacking detection triggers when >80% of earned reward comes from one
+  source (unit-tested; balanced distributions never flagged)
+- ✅ Reward plot generated via `rl run --plot` (learning-curve check moves to
+  Sprint 14/18)
+
+### Next up (Sprint 14)
+
+First learning agent: Stable-Baselines3 PPO on WorldSimEnv, training script,
+metrics logging (episode return/loss/entropy), first checkpoint, evaluation
+vs rule-based baseline.
+
+---
+
 ## Session 13 — 2026-08-20 — Pre-Phase-3 Hygiene + Sprint 12: ML Environment
 
 **Scope:** Test split + profiling (queued from Session 11), then Phase 3 /
