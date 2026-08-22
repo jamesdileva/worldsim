@@ -170,14 +170,13 @@ def test_route_deactivates_when_partner_dies():
 
 
 def test_auto_trade_connects_adjacent_pairs_only():
+    """Sprint 11: trade routes form between known neighbors (proximity OR
+    territory contact) — with all settlements within range, all pairs link."""
     sim, settlements = make_sim(seed=12345, count=3)
-    # Force all three into a chain: A-B adjacent, C far away.
-    force_adjacent(sim, settlements[0], settlements[1])
     sim._auto_trade_rule()
     active = sim.active_routes()
-    assert len(active) == 1
-    pair = {active[0].source_id, active[0].dest_id}
-    assert settlements[2].id not in pair
+    # C(3,2) = 3 unique pairs.
+    assert len(active) == 3
 
 
 # ----------------------------------------------------------------------

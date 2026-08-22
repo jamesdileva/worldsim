@@ -154,6 +154,9 @@ def _encode_settlement(s: Settlement) -> dict:
         "build_queue": list(s.build_queue),
         "personality": dict(s.personality),
         "ruin_origin": s.ruin_origin,
+        "strategy_label": s.strategy_label,
+        "raids_committed": s.raids_committed,
+        "routes_established": s.routes_established,
     }
 
 
@@ -174,6 +177,9 @@ def _decode_settlement(obj: dict) -> Settlement:
         build_queue=list(obj.get("build_queue", [])),
         personality=dict(obj.get("personality", {})),
         ruin_origin=obj.get("ruin_origin"),
+        strategy_label=obj.get("strategy_label", "settling"),
+        raids_committed=obj.get("raids_committed", 0),
+        routes_established=obj.get("routes_established", 0),
     )
 
 
@@ -276,6 +282,7 @@ def serialize_world(
     building_debuffs: list[BuildingDebuff] | None = None,
     event_log: list[WorldEvent] | None = None,
     diplomacy: DiplomacyState | None = None,
+    strategy_memory: dict | None = None,
 ) -> str:
     state = {
         "seed": world.seed,
@@ -308,6 +315,10 @@ def serialize_world(
             for e in (event_log or [])
         ],
         "diplomacy": diplomacy.to_dict() if diplomacy else {},
+        "strategy_memory": [
+            {"archetype": arch, "action": action, "ema_reward": value}
+            for (arch, action), value in (strategy_memory or {}).items()
+        ],
     }
     return json.dumps(state, sort_keys=True)
 
@@ -325,6 +336,7 @@ def deserialize_world(
     list[BuildingDebuff],
     list[WorldEvent],
     DiplomacyState,
+    dict,
 ]:
     state = json.loads(state_json)
     world = World(seed=state["seed"], size=state["size"])
@@ -364,6 +376,10 @@ def deserialize_world(
         for obj in state.get("event_log", [])
     ]
     diplomacy = DiplomacyState.from_dict(state.get("diplomacy", {}))
+    strategy_memory = {
+        (obj["archetype"], int(obj["action"])): obj["ema_reward"]
+        for obj in state.get("strategy_memory", [])
+    }
     return (
         world,
         settlements,
@@ -375,6 +391,7 @@ def deserialize_world(
         building_debuffs,
         event_log,
         diplomacy,
+        strategy_memory,
     )
 
 
@@ -408,6 +425,7 @@ class WorldStore:
         building_debuffs: list[BuildingDebuff] | None = None,
         event_log: list[WorldEvent] | None = None,
         diplomacy: DiplomacyState | None = None,
+        strategy_memory: dict | None = None,
     ) -> str:
         """Insert a world row, write a snapshot, and upsert settlement,
         resource, and trade-route rows."""
@@ -435,6 +453,7 @@ class WorldStore:
                         building_debuffs,
                         event_log,
                         diplomacy,
+                        strategy_memory,
                     ),
                 ),
             )
@@ -539,6 +558,7 @@ class WorldStore:
         building_debuffs: list[BuildingDebuff] | None = None,
         event_log: list[WorldEvent] | None = None,
         diplomacy: DiplomacyState | None = None,
+        strategy_memory: dict | None = None,
     ) -> str:
         """Save under a caller-chosen id (upsert)."""
         if self.world_exists(world_id):
@@ -554,6 +574,7 @@ class WorldStore:
                 building_debuffs=building_debuffs,
                 event_log=event_log,
                 diplomacy=diplomacy,
+                strategy_memory=strategy_memory,
             )
             return world_id
         created_at = datetime.now(timezone.utc).isoformat()
@@ -578,6 +599,7 @@ class WorldStore:
                         building_debuffs,
                         event_log,
                         diplomacy,
+                        strategy_memory,
                     ),
                 ),
             )
@@ -632,6 +654,7 @@ class WorldStore:
         building_debuffs: list[BuildingDebuff] | None = None,
         event_log: list[WorldEvent] | None = None,
         diplomacy: DiplomacyState | None = None,
+        strategy_memory: dict | None = None,
     ) -> None:
         """Write a new snapshot for an existing world and bump last_tick."""
         if not self.world_exists(world_id):
@@ -658,6 +681,7 @@ class WorldStore:
                         building_debuffs,
                         event_log,
                         diplomacy,
+                        strategy_memory,
                     ),
                 ),
             )

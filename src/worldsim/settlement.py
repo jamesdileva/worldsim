@@ -15,17 +15,33 @@ from dataclasses import dataclass, field
 PERSONALITY_SEED_OFFSET = 5_000_000
 PERSONALITY_TRAITS = ("expansionism", "industry", "commerce", "aggression")
 
+# Sprint 11: five preset archetypes. Assigned at spawn (seeded), stored in
+# the personality dict under "archetype"; biases action selection without
+# fully constraining it.
+ARCHETYPES = ("agricultural", "mining", "trading", "military", "balanced")
+STRATEGY_LABEL_INTERVAL_TICKS = 250
+
+
+def assign_archetype(seed: int, settlement_index: int) -> str:
+    rng = random.Random(
+        (seed ^ (PERSONALITY_SEED_OFFSET + 7777)) + settlement_index * 104729
+    )
+    return rng.choice(ARCHETYPES)
+
 
 def assign_personality(seed: int, settlement_index: int) -> dict[str, float]:
-    """Seeded personality vector in [0,1] per trait (Sprint 8).
+    """Seeded personality vector in [0,1] per trait, plus archetype (Sprint 11).
 
     Traits bias the rule-based agent's thresholds: expansionism speeds
     claiming, industry favors sawmills/mines, commerce speeds trade,
-    aggression is reserved for Sprint 9+ military decisions."""
+    aggression gates raiding. The archetype adds a strategy bias without
+    fully constraining behavior."""
     rng = random.Random(
         (seed ^ PERSONALITY_SEED_OFFSET) + settlement_index * 7919
     )
-    return {trait: round(rng.random(), 3) for trait in PERSONALITY_TRAITS}
+    personality = {trait: round(rng.random(), 3) for trait in PERSONALITY_TRAITS}
+    personality["archetype"] = assign_archetype(seed, settlement_index)
+    return personality
 
 GROWTH_INTERVAL_TICKS = 24
 STARVATION_INTERVAL_TICKS = 48
@@ -72,8 +88,13 @@ class Settlement:
     low_happiness_progress: int = 0
     # Set when founded on/near ruins: id of the origin RuinSite (Sprint 5).
     ruin_origin: str | None = None
-    # Personality vector biasing agent decisions (Sprint 8): trait -> [0,1].
+    # Personality vector biasing agent decisions (Sprint 8): trait -> [0,1],
+    # plus "archetype" key (Sprint 11).
     personality: dict[str, float] = field(default_factory=dict)
+    # Sprint 11: emergent strategy label derived from building mix/actions.
+    strategy_label: str = "settling"
+    raids_committed: int = 0
+    routes_established: int = 0
     # Food income minus consumption for the most recent tick (set by sim).
     net_food_rate: float = 0.0
 

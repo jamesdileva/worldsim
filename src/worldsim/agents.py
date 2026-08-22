@@ -112,7 +112,10 @@ def observe_vector(sim, settlement: Settlement) -> np.ndarray:
     obs[30] = clamp01(droughts / 3.0)
     obs[31] = 1.0 if sim._ruin_adjacent(settlement) else 0.0
 
-    # 32-37: reserved military.
+    # 32: neighbor count (military dimension — wired Sprint 11 so military
+    # archetypes can detect raid targets among neutral neighbors).
+    obs[32] = clamp01(len(sim.neighbors_of(settlement)) / 5.0)
+    # 33-37: reserved military detail.
     # Sprint 9 diplomacy dims:
     hostile_neighbors = sum(
         1
@@ -185,6 +188,20 @@ class RuleBasedAgent(Agent):
 
     EPSILON = 0.10  # spec: 10% chance of a random action
 
+    # Exploration pool excludes BUILD_* actions: random construction ignores
+    # affordability/caps and drowns archetype specialization in noise.
+    _EXPLORATION_ACTIONS = sorted(
+        int(a)
+        for a in WIRED_ACTIONS
+        if a
+        not in (
+            Action.BUILD_FARM,
+            Action.BUILD_SAWMILL,
+            Action.BUILD_MINE,
+            Action.BUILD_GRANARY,
+        )
+    )
+
     def __init__(self, seed: int, settlement_index: int) -> None:
         self.seed = seed
         self.index = settlement_index
@@ -202,6 +219,7 @@ class RuleBasedAgent(Agent):
             "industry": 0.5,
             "commerce": 0.5,
             "aggression": 0.5,
+            "archetype": "balanced",
         }
         return observe_vector(sim, settlement)
 
@@ -212,14 +230,14 @@ class RuleBasedAgent(Agent):
         return action
 
     def _epsilon_action(self, tick: int) -> int:
-        """10% uniform over wired actions (random no-ops teach nothing)."""
+        """10% uniform over wired non-construction actions."""
         rng = random.Random(
             (self.seed ^ 0xC0DE) + tick * 7919 + self.index * 131
         )
         if rng.random() >= self.EPSILON:
             return -1
-        wired = sorted(int(a) for a in WIRED_ACTIONS)
-        return wired[rng.randrange(len(wired))]
+        pool = self._EXPLORATION_ACTIONS
+        return pool[rng.randrange(len(pool))]
 
     def _policy(self, obs: np.ndarray) -> int:
         tick = self._tick if self._tick is not None else self.call_count
@@ -232,13 +250,53 @@ class RuleBasedAgent(Agent):
         industry = p.get("industry", 0.5)
         commerce = p.get("commerce", 0.5)
 
-        # Personality-biased cadences.
+        # Sprint 11: archetype biases — thresholds shift, nothing is forced.
+        archetype = p.get("archetype", "balanced")
+        # Farm ceilings (normalized /50): specialization means non-farm
+        # archetypes stop spamming farms once basic food security is met.
+        farm_caps = {
+            "agricultural": 0.8,
+            "balanced": 0.5,
+            "mining": 0.15,
+            "trading": 0.24,
+            "military": 0.2,
+        }
+        farms_cap = farm_caps.get(archetype, 0.5)
+        # Granary ceilings (normalized /50): oversized storage keeps
+        # food_level permanently low, which deadlocks the policy in famine
+        # mode. Agricultural settlements store more.
+        granary_caps = {
+            "agricultural": 0.12,
+            "balanced": 0.08,
+            "mining": 0.04,
+            "trading": 0.04,
+            "military": 0.04,
+        }
+        granaries_cap = granary_caps.get(archetype, 0.08)
+        if archetype == "trading":
+            trade_interval = max(4, int(TRADE_INTERVAL_TICKS / 2))
+        else:
+            trade_interval = max(8, int(TRADE_INTERVAL_TICKS / (0.5 + commerce)))
         claim_interval = max(8, int(CLAIM_INTERVAL_TICKS / (0.5 + expansionism)))
         road_interval = max(6, int(ROAD_INTERVAL_TICKS / (0.5 + industry)))
-        trade_interval = max(8, int(TRADE_INTERVAL_TICKS / (0.5 + commerce)))
-        # Industrial settlements keep deeper stockpiles before switching to
-        # income buildings; commercial ones push trade earlier.
+        # Industrial (mining) archetypes build income buildings at higher
+        # stockpile levels; agricultural ones keep a deeper food buffer.
         stockpile_floor = 0.05 + industry * 0.10
+        farm_growth_chance = 0.3 * (1.25 - expansionism)
+        famine_food_level = 0.2
+        granary_food_level = 0.9
+        raid_gate = RAID_AGGRESSION_GATE
+        if archetype == "mining":
+            stockpile_floor += 0.10
+            road_interval = max(6, int(road_interval * 0.7))
+        elif archetype == "agricultural":
+            famine_food_level = 0.3
+            farm_growth_chance *= 2.0
+            granary_food_level = 0.85
+        elif archetype == "military":
+            raid_gate = min(raid_gate, 0.5)
+        elif archetype == "balanced":
+            pass
 
         food_level = float(obs[1])
         net_food = float(obs[2]) * 2.0 - 1.0  # back to [-1, 1]
@@ -259,8 +317,8 @@ class RuleBasedAgent(Agent):
         has_farm = farms >= 0.02 - 1e-6  # at least one farm
 
         # --- Urgency 1: famine response ---------------------------------
-        if food_level < 0.2 or net_food < -0.05:
-            if farms < 0.8 and can_farm:
+        if food_level < famine_food_level or net_food < -0.05:
+            if farms < farms_cap and can_farm:
                 return int(Action.BUILD_FARM)
             if can_mine:
                 return int(Action.BUILD_MINE)
@@ -269,7 +327,12 @@ class RuleBasedAgent(Agent):
             return int(Action.WAIT)
 
         # --- Urgency 2: food security ------------------------------------
-        if food_level > 0.9 and granaries < 0.4 and can_granary:
+        if (
+            food_level > granary_food_level
+            and granaries < granaries_cap
+            and can_granary
+        ):
+            return int(Action.BUILD_GRANARY)
             return int(Action.BUILD_GRANARY)
 
         # --- Urgency 3: expansion / infrastructure / trade cadences ------
@@ -280,12 +343,21 @@ class RuleBasedAgent(Agent):
         if self.call_count % trade_interval == 10:
             return int(Action.ESTABLISH_TRADE_ROUTE)
 
-        # --- Urgency 3.5: raids (aggressive, at war, on cadence) ----------
+        # --- Urgency 3.5: raids ------------------------------------------
+        # Hostile settlements raid hostile neighbors; military archetypes
+        # also START conflicts against neutral neighbors (aggression creates
+        # hostility, not the other way around).
         aggression = p.get("aggression", 0.5)
+        if archetype == "military":
+            aggression = max(aggression, RAID_AGGRESSION_GATE)
         hostile_neighbors = float(obs[42])
+        neighbor_count = float(obs[32])
+        warlike = hostile_neighbors > 0.0 or (
+            archetype == "military" and neighbor_count > 0.0
+        )
         if (
-            aggression > RAID_AGGRESSION_GATE
-            and hostile_neighbors > 0.0
+            aggression > raid_gate
+            and warlike
             and self.call_count % RAID_CADENCE_TICKS == 15
         ):
             return int(Action.INITIATE_RAID)
@@ -295,29 +367,103 @@ class RuleBasedAgent(Agent):
         # weary of war or naturally peaceful.
         at_war = float(obs[45]) > 0.0
         incoming_offer = float(obs[46]) > 0.0
-        if at_war and incoming_offer and aggression < 0.7:
+        peace_gate = 0.7 if archetype != "military" else 0.9
+        weariness = (
+            WAR_WEARINESS_TICKS // 2 if archetype == "military"
+            else WAR_WEARINESS_TICKS
+        )
+        if at_war and incoming_offer and aggression < peace_gate:
             if self.call_count % 100 == 3:
                 return int(Action.ACCEPT_PEACE)
         if at_war and aggression < 0.4:
             if self.call_count % 100 == 33:
                 return int(Action.OFFER_PEACE)
-        elif at_war and self.call_count % (WAR_WEARINESS_TICKS) == 55:
+        elif at_war and self.call_count % weariness == 55:
             return int(Action.OFFER_PEACE)
 
         # --- Urgency 4: resource income (sub-cadence gated) --------------
-        if wood < stockpile_floor and has_farm and can_sawmill and self.call_count % 8 == 2:
+        # Mining archetypes attempt income buildings twice as often and
+        # regardless of current stock, with a much higher ceiling — industry
+        # is their identity. Others stop at a modest income sector.
+        mining_archetype = archetype == "mining"
+        income_count = float(obs[8]) + float(obs[9])
+        income_cap = 1.0 if mining_archetype else 0.3
+        if has_farm and can_sawmill and income_count < income_cap and (
+            (mining_archetype and self.call_count % 4 == 2)
+            or (wood < stockpile_floor and self.call_count % 8 == 2)
+        ):
             return int(Action.BUILD_SAWMILL)
-        if stone < stockpile_floor and has_farm and can_mine and self.call_count % 8 == 6:
+        if has_farm and can_mine and income_count < income_cap and (
+            (mining_archetype and self.call_count % 4 == 0)
+            or (stone < stockpile_floor and self.call_count % 8 == 6)
+        ):
             return int(Action.BUILD_MINE)
 
         # --- Urgency 5: steady-state farm growth -------------------------
-        if farms < 0.6 and can_farm:
+        if farms < farms_cap and can_farm:
             farm_rng = random.Random(
                 (self.seed ^ 0xB7E2) + tick * 104729 + self.index * 17
             )
-            if farm_rng.random() < 0.3 * (1.25 - expansionism):
+            if farm_rng.random() < farm_growth_chance:
                 return int(Action.BUILD_FARM)
         return int(Action.WAIT)
+
+
+def derive_strategy_label(
+    farms: int,
+    granaries: int,
+    sawmills: int,
+    mines: int,
+    active_routes: int,
+    routes_established: int,
+    raids_committed: int,
+    route_transfers: int = 0,
+    fallback_archetype: str = "balanced",
+) -> str:
+    """Classify a settlement's emergent strategy from its building mix and
+    behavior (Sprint 11).
+
+    Each strategy is scored on its OWN natural scale (normalized 0..1):
+    building shares for agri/mining, route initiative for trading, raid
+    campaigns for military. Whoever is most fully 'expressed' wins; weak
+    signals across the board fall back to the settlement's archetype —
+    behavior hasn't differentiated yet, so identity defaults to intent."""
+    total_buildings = farms + granaries + sawmills + mines
+    magnitude = min(total_buildings, 10.0) / 10.0
+    agri_share = (
+        ((farms + granaries) / total_buildings) if total_buildings else 0.0
+    )
+    mining_share = (
+        ((sawmills + mines) / total_buildings) if total_buildings else 0.0
+    )
+    scores = {
+        "agricultural": agri_share * magnitude,
+        "mining": mining_share * magnitude,
+        "trading": (
+            min(routes_established / 3.0, 1.0) * 0.7
+            + min(active_routes / 4.0, 1.0) * 0.3
+        ),
+        "military": min(raids_committed / 6.0, 1.0),
+    }
+    ranked = sorted(scores.items(), key=lambda kv: -kv[1])
+    best_label, best = ranked[0]
+    second = ranked[1][1]
+    # Expression thresholds per strategy: farming is everyone's baseline, so
+    # 'agricultural' must dominate outright; trading/military need meaningful
+    # campaigns. Below those bars, identity defaults to archetype intent.
+    thresholds = {
+        # Farming is everyone's baseline: ~90% of a typical mix is farms and
+        # granaries, so 'agricultural' demands near-total dominance.
+        "agricultural": 0.95,
+        "mining": 0.75,
+        "trading": 0.60,
+        "military": 0.60,
+    }
+    if best < thresholds.get(best_label, 0.60):
+        return fallback_archetype
+    if second > best - 0.05:
+        return fallback_archetype  # genuine near-tie across strategies
+    return best_label
 
 
 

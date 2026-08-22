@@ -57,6 +57,7 @@ from .relations import (
 )
 from .settlement import (
     LOW_HAPPINESS_COLLAPSE_TICKS,
+    STRATEGY_LABEL_INTERVAL_TICKS,
     assign_personality,
     Settlement,
 )
@@ -101,7 +102,9 @@ RUIN_RESETTLE_CHANCE = 0.10
 RUIN_GROWTH_MULTIPLIER = 2
 
 # Competition (Sprint 9): neighbors, raids, contested zones, events.
-NEIGHBOR_SPAWN_DISTANCE = 48
+# Sprint 11: raised from 48 to 96 — sparse worlds left most settlements
+# unreachable, which starved trade/diplomacy (and thus strategy emergence).
+NEIGHBOR_SPAWN_DISTANCE = 96
 RAID_BUILDING_DEBUFF_TICKS = 200
 RAID_BUILDING_DEBUFF_MULTIPLIER = 0.5
 RAID_THEFT_UNITS = 10
@@ -209,6 +212,8 @@ class Simulation:
     # Sprint 10: wars, alliances, peace offers, reputation.
     diplomacy: DiplomacyState = field(default_factory=DiplomacyState)
     _interacted_this_tick: set[str] = field(default_factory=set)
+    # Sprint 11: strategy memory — EMA reward per (archetype, action_id).
+    strategy_memory: dict[tuple[str, int], float] = field(default_factory=dict)
 
     @property
     def tick(self) -> int:
@@ -658,9 +663,10 @@ class Simulation:
             ids = {route.source_id, route.dest_id}
             if a.id in ids and b.id in ids:
                 return False
-        return self._territories_adjacent(
-            self.settlements.index(a), self.settlements.index(b)
-        )
+        # Trade needs known neighbors: territory contact OR proximity
+        # (Sprint 11 — waiting for physical border contact starved the
+        # trading strategy in sparse worlds).
+        return any(n.id == b.id for n in self.neighbors_of(a))
 
     def establish_route(
         self, source: Settlement, dest: Settlement
@@ -679,6 +685,7 @@ class Simulation:
                 )
             ),
         )
+        source.routes_established += 1
         self.trade_routes.append(route)
         self.relations.adjust(source.id, dest.id, TRADE_ESTABLISHED_BONUS)
         self.log_event(
@@ -1128,11 +1135,28 @@ class Simulation:
         return [s for s in self.settlements if s.id in ids]
 
     def _refresh_contested_zones(self) -> None:
-        """Recompute contested border tiles from current relations."""
+        """Recompute contested border tiles: hostile-pair borders, plus
+        borders of warlike military settlements (military pressure creates
+        border friction even before hostility)."""
         self.contested = {}
-        for id_a, id_b, score in self.relations.pairs():
-            if score >= -25.0:
-                continue
+        friction_pairs: list[tuple[str, str]] = [
+            (id_a, id_b)
+            for id_a, id_b, score in self.relations.pairs()
+            if score < -25.0
+        ]
+        for settlement in self.settlements:
+            if (
+                settlement.is_alive
+                and self._is_warlike_military(settlement)
+            ):
+                for neighbor in self.neighbors_of(settlement):
+                    if not self.diplomacy.is_allied(
+                        settlement.id, neighbor.id
+                    ):
+                        friction_pairs.append(
+                            (settlement.id, neighbor.id)
+                        )
+        for id_a, id_b in friction_pairs:
             a = self.settlement_by_id(id_a)
             b = self.settlement_by_id(id_b)
             if a is None or b is None or not (a.is_alive and b.is_alive):
@@ -1175,14 +1199,23 @@ class Simulation:
                 mult *= debuff.multiplier
         return mult
 
+    def _is_warlike_military(self, settlement: Settlement) -> bool:
+        """Military archetypes project force; border friction follows."""
+        return settlement.personality.get("archetype") == "military"
+
     def _raidable_targets(
         self, attacker: Settlement
     ) -> dict[str, list[tuple[int, int]]]:
-        """Improved tiles of hostile neighbours inside contested zones,
-        grouped by defender id."""
+        """Improved tiles of neighbor settlements inside contested zones,
+        grouped by defender id. Warlike military attackers may also target
+        neutral neighbors (aggression creates hostility)."""
+        warlike = self._is_warlike_military(attacker)
         targets: dict[str, list[tuple[int, int]]] = {}
         for neighbor in self.neighbors_of(attacker):
-            if not self.relations.is_hostile(attacker.id, neighbor.id):
+            hostile = self.relations.is_hostile(attacker.id, neighbor.id)
+            if not hostile and not (
+                warlike and not self.diplomacy.is_allied(attacker.id, neighbor.id)
+            ):
                 continue
             idx = self.settlements.index(neighbor)
             improved = np.argwhere(
@@ -1229,6 +1262,7 @@ class Simulation:
             return False
 
         self.last_raid_tick[attacker.id] = self.tick
+        attacker.raids_committed += 1
         self._interacted_this_tick.update((attacker.id, defender.id))
         aggression = attacker.personality.get("aggression", 0.5)
         size_factor = min(defender.population / 100.0, 0.4)
@@ -1465,6 +1499,67 @@ class Simulation:
         # Ruins may spontaneously re-settle.
         for ruin in list(self.ruins):
             self._try_resettle_ruin(ruin)
+        # Sprint 11: emergent strategy labels + evolution checkpoints.
+        if self.tick % STRATEGY_LABEL_INTERVAL_TICKS == 0:
+            self._update_strategy_labels()
+        if self.tick > 0 and self.tick % 1000 == 0:
+            self._log_strategy_evolution()
+
+    def _update_strategy_labels(self) -> None:
+        from .agents import derive_strategy_label
+
+        for settlement in self.settlements:
+            if not settlement.is_alive:
+                continue
+            counts = self.buildings_of(settlement)
+            route_transfers = sum(
+                r.transfers
+                for r in self.active_routes()
+                if settlement.id in (r.source_id, r.dest_id)
+            )
+            new_label = derive_strategy_label(
+                farms=counts[BuildingType.FARM],
+                granaries=counts[BuildingType.GRANARY],
+                sawmills=counts[BuildingType.SAWMILL],
+                mines=counts[BuildingType.MINE],
+                active_routes=sum(
+                    1
+                    for r in self.active_routes()
+                    if settlement.id in (r.source_id, r.dest_id)
+                ),
+                routes_established=settlement.routes_established,
+                raids_committed=settlement.raids_committed,
+                route_transfers=route_transfers,
+                fallback_archetype=settlement.personality.get(
+                    "archetype", "balanced"
+                ),
+            )
+            if new_label != settlement.strategy_label:
+                self.log_event(
+                    "strategy",
+                    [settlement.id],
+                    f"{settlement.name} strategy shifted: "
+                    f"{settlement.strategy_label} -> {new_label}",
+                )
+                settlement.strategy_label = new_label
+
+    def _log_strategy_evolution(self) -> None:
+        """Log the dominant strategy distribution at milestone ticks."""
+        distribution = self.strategy_distribution()
+        dominant = max(distribution, key=distribution.get) if distribution else "none"
+        self.log_event(
+            "strategy_evolution",
+            [s.id for s in self.settlements if s.is_alive],
+            f"tick {self.tick}: dominant strategy = {dominant} "
+            f"({distribution})",
+        )
+
+    def strategy_distribution(self) -> dict[str, int]:
+        dist: dict[str, int] = {}
+        for s in self.settlements:
+            if s.is_alive:
+                dist[s.strategy_label] = dist.get(s.strategy_label, 0) + 1
+        return dist
 
     def _finalize_transition(
         self, settlement: Settlement, next_obs: np.ndarray
@@ -1492,6 +1587,13 @@ class Simulation:
                 np.asarray(next_obs, dtype=np.float32).tobytes(),
                 False,
             )
+        )
+        # Sprint 11: strategy memory — EMA of reward per archetype/action.
+        archetype = settlement.personality.get("archetype", "balanced")
+        key = (archetype, int(prev_action))
+        prior = self.strategy_memory.get(key)
+        self.strategy_memory[key] = (
+            reward if prior is None else prior * 0.9 + reward * 0.1
         )
 
     def flush_experiences(self, store) -> int:
@@ -1530,7 +1632,8 @@ class Simulation:
         return (
             f"tick {self.tick:>6} | pop {settlement.population:>4} | "
             f"food {settlement.food_stock:>9.1f} | territory {territory:>4} | "
-            f"bld {buildings:>3} | road {roads:>3} | route {routes} | {state}"
+            f"bld {buildings:>3} | road {roads:>3} | route {routes} | "
+            f"{settlement.strategy_label:<12} | {state}"
         )
 
 
@@ -1545,6 +1648,7 @@ def simulation_from_state(
     building_debuffs: list[BuildingDebuff] | None = None,
     event_log: list[WorldEvent] | None = None,
     diplomacy: DiplomacyState | None = None,
+    strategy_memory: dict | None = None,
 ) -> Simulation:
     """Rebuild a Simulation from deserialized snapshot state (Sprint 6).
 
@@ -1561,6 +1665,7 @@ def simulation_from_state(
         building_debuffs=building_debuffs or [],
         event_log=event_log or [],
         diplomacy=diplomacy if diplomacy is not None else DiplomacyState(),
+        strategy_memory=strategy_memory or {},
     )
     sim.agents = [
         RuleBasedAgent(world.seed, idx) for idx in range(len(settlements))

@@ -198,6 +198,7 @@ def _autosave(store: WorldStore, args, sim: Simulation, world_id: str | None) ->
         building_debuffs=sim.building_debuffs,
         event_log=sim.event_log,
         diplomacy=sim.diplomacy,
+        strategy_memory=sim.strategy_memory,
     )
     return store.save_world_with_id(
         world_id if world_id is not None else str(uuid.uuid4()), sim.world, **kwargs
@@ -245,6 +246,9 @@ def cmd_simulate(args: argparse.Namespace) -> int:
                         f"{total} units moved"
                     )
                 print(f"  clock: {describe(sim.tick)}")
+                dist = sim.strategy_distribution()
+                if dist:
+                    print(f"  strategies: {dist}")
                 any_alive = any(s.is_alive for s in settlements)
                 if not any_alive:
                     print("All settlements have collapsed.")
@@ -289,6 +293,7 @@ def cmd_save(args: argparse.Namespace) -> int:
             building_debuffs=sim.building_debuffs,
             event_log=sim.event_log,
         diplomacy=sim.diplomacy,
+        strategy_memory=sim.strategy_memory,
         )
         store.insert_world_events(sim.event_log)
     finally:
@@ -311,6 +316,7 @@ def cmd_load(args: argparse.Namespace) -> int:
             debuffs,
             events,
             diplomacy,
+            strategy_memory,
         ) = store.load_latest_snapshot(args.world_id)
     finally:
         store.close()
@@ -363,6 +369,7 @@ def cmd_step(args: argparse.Namespace) -> int:
             debuffs,
             events,
             diplomacy,
+            strategy_memory,
         ) = store.load_latest_snapshot(args.world_id)
         sim = simulation_from_state(
             world,
@@ -374,6 +381,8 @@ def cmd_step(args: argparse.Namespace) -> int:
             contested=contested,
             building_debuffs=debuffs,
             event_log=events,
+            diplomacy=diplomacy,
+            strategy_memory=strategy_memory,
         )
         before_tick = sim.tick
         sim.run(args.ticks)
@@ -389,6 +398,7 @@ def cmd_step(args: argparse.Namespace) -> int:
             building_debuffs=sim.building_debuffs,
             event_log=sim.event_log,
         diplomacy=sim.diplomacy,
+        strategy_memory=sim.strategy_memory,
         )
         store.insert_world_events(sim.event_log)
     finally:
@@ -416,6 +426,7 @@ def cmd_god(args: argparse.Namespace) -> int:
             debuffs,
             events,
             diplomacy,
+            strategy_memory,
         ) = store.load_latest_snapshot(args.world_id)
         sim = simulation_from_state(
             world,
@@ -427,6 +438,8 @@ def cmd_god(args: argparse.Namespace) -> int:
             contested=contested,
             building_debuffs=debuffs,
             event_log=events,
+            diplomacy=diplomacy,
+            strategy_memory=strategy_memory,
         )
         target = None
         before: dict | None = None
@@ -473,7 +486,8 @@ def cmd_god(args: argparse.Namespace) -> int:
             building_debuffs=sim.building_debuffs,
             event_log=sim.event_log,
         diplomacy=sim.diplomacy,
-        )
+        strategy_memory=sim.strategy_memory,
+    )
     finally:
         store.close()
     print(f"God event '{args.action}' applied at {describe(sim.tick)}")
@@ -525,6 +539,7 @@ def cmd_benchmark(args: argparse.Namespace) -> int:
             survivors = len(alive)
             survivors_total += 1 if survivors > 0 else 0
             worlds += 1
+            distinct_strategies = len(sim.strategy_distribution())
             inv = lambda s, r: sum(  # noqa: E731
                 x.resource_inventory.get(r, 0.0) for x in settlements
             )
@@ -551,7 +566,8 @@ def cmd_benchmark(args: argparse.Namespace) -> int:
             print(
                 f"  seed {seed}: survivors {survivors}/{len(settlements)}, "
                 f"peak pop {peak}, avg survival "
-                f"{metrics['avg_survival_ticks']:.0f} ticks"
+                f"{metrics['avg_survival_ticks']:.0f} ticks, "
+                f"distinct strategies {distinct_strategies}"
             )
     finally:
         store.close()

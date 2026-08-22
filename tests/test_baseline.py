@@ -5,7 +5,7 @@ from worldsim.actions import Action, WIRED_ACTIONS
 from worldsim.agents import RuleBasedAgent
 from worldsim.buildings import BuildingType, Improvement
 from worldsim.db import WorldStore
-from worldsim.settlement import PERSONALITY_TRAITS, assign_personality
+from worldsim.settlement import ARCHETYPES, PERSONALITY_TRAITS, assign_personality
 from worldsim.simulation import Simulation
 from worldsim.tiles import TerrainType
 from worldsim.world import World
@@ -27,14 +27,15 @@ def test_assign_personality_seeded_and_bounded():
     c = assign_personality(42, 1)
     assert a == b
     assert a != c
-    assert set(a) == set(PERSONALITY_TRAITS)
-    assert all(0.0 <= v <= 1.0 for v in a.values())
+    assert set(a) == set(PERSONALITY_TRAITS) | {"archetype"}
+    assert all(0.0 <= v <= 1.0 for k, v in a.items() if k != "archetype")
+    assert a["archetype"] in ARCHETYPES
 
 
 def test_settlements_get_personalities_at_spawn():
     sim, settlements = make_sim(seed=42, count=3)
     for s in settlements:
-        assert set(s.personality) == set(PERSONALITY_TRAITS)
+        assert set(s.personality) == set(PERSONALITY_TRAITS) | {"archetype"}
     # Distinct settlements have distinct vectors.
     vecs = [tuple(sorted(s.personality.items())) for s in settlements]
     assert len(set(vecs)) == len(vecs)

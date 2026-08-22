@@ -82,14 +82,20 @@ def test_neighbors_detected_within_distance():
 
 def test_distant_settlements_not_neighbors():
     sim, (a,) = make_sim(seed=42, count=1)
-    # A settlement spawned far away is not a neighbor.
+    # A settlement at the farthest corner from the spawn is not a neighbor.
+    size = sim.world.size
+    corners = [(0, 0), (0, size - 1), (size - 1, 0), (size - 1, size - 1)]
+    fy, fx = max(
+        corners,
+        key=lambda c: max(abs(c[0] - a.spawn_y), abs(c[1] - a.spawn_x)),
+    )
     from worldsim.settlement import Settlement
 
-    far = Settlement(name="Faraway", spawn_x=0, spawn_y=0)
+    far = Settlement(name="Faraway", spawn_x=fx, spawn_y=fy)
     sim.settlements.append(far)
     neighbors = sim.neighbors_of(a)
     assert all(n.id != far.id for n in neighbors)
-    dist = max(abs(far.spawn_x - a.spawn_x), abs(far.spawn_y - a.spawn_y))
+    dist = max(abs(fy - a.spawn_y), abs(fx - a.spawn_x))
     assert dist > NEIGHBOR_SPAWN_DISTANCE
 
 
@@ -289,10 +295,14 @@ def test_contested_zones_expire_when_cooling():
     sim, settlements = make_sim(seed=42, count=2)
     a, b = settlements
     _prepare_war(sim, a, b)
-    sim.contested.clear()  # recompute from relations
     sim._refresh_contested_zones()
     had = len(sim.contested) > 0
-    sim.relations.adjust(a.id, b.id, +200)  # make peace
+    sim.relations.set_score(a.id, b.id, +200.0)  # make peace
+    # Ensure neither is a warlike military settlement (which would keep
+    # friction zones alive regardless of relations).
+    for s in (a, b):
+        s.personality["archetype"] = "balanced"
+        s.personality["aggression"] = 0.1
     sim._refresh_contested_zones()
     if had:
         assert len(sim.contested) == 0
@@ -323,6 +333,7 @@ def test_event_log_serialized_in_snapshot():
             _,
             events,
             diplo,
+            memory,
         ) = store.load_latest_snapshot(wid)
         assert len(events) >= 1
         assert any(e.type == "trade_route" for e in events)
