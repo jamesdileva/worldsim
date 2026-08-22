@@ -255,6 +255,22 @@ def build_parser() -> argparse.ArgumentParser:
         "--plot", default=None,
         help="Optional learning-curve .png output path",
     )
+
+    evo = rl_sub.add_parser(
+        "evolve",
+        help="Population-based generational training (Sprint 19)",
+    )
+    evo.add_argument("--population", type=int, default=4,
+                     help="Candidates per generation")
+    evo.add_argument("--generations", type=int, default=2)
+    evo.add_argument("--timesteps-per-candidate", type=int, default=4096)
+    evo.add_argument("--seed-base", type=int, default=1000,
+                     help="Base seed; each candidate gets seed_base + offsets")
+    evo.add_argument("--size", type=int, default=64)
+    evo.add_argument("--settlements", type=int, default=3)
+    evo.add_argument("--max-ticks", type=int, default=500)
+    evo.add_argument("--parallel", type=int, default=1,
+                     help="Workers per candidate training run")
     return parser
 
 
@@ -691,6 +707,8 @@ def cmd_rl(args: argparse.Namespace) -> int:
         return _cmd_rl_compare(args)
     if args.rl_command == "dashboard":
         return _cmd_rl_dashboard(args)
+    if args.rl_command == "evolve":
+        return _cmd_rl_evolve(args)
     print(f"unknown rl command: {args.rl_command}", file=sys.stderr)
     return 2
 
@@ -968,6 +986,38 @@ def _cmd_rl_dashboard(args: argparse.Namespace) -> int:
     with out_json.open("w", encoding="utf-8") as fh:
         json.dump(report, fh, indent=2)
     print(f"full results written to {out_json}")
+    return 0
+
+
+POLICIES_LOG_DIR = Path("data/world_sim/policies")
+
+
+def _cmd_rl_evolve(args: argparse.Namespace) -> int:
+    """Sprint 19: population-based generational training."""
+    from .population import evolve
+
+    results = evolve(
+        generations=args.generations,
+        population_size=args.population,
+        timesteps_per_candidate=args.timesteps_per_candidate,
+        seed_base=args.seed_base,
+        size=args.size,
+        num_settlements=args.settlements,
+        max_ticks=args.max_ticks,
+        n_envs=args.parallel,
+    )
+    print("\nEvolution summary:")
+    for gen_result in results["generations"]:
+        print(
+            f"  {gen_result['generation']}: champion="
+            f"{gen_result['champion']} "
+            f"(return {gen_result['champion_mean_return']}, "
+            f"parent={gen_result['parent']})"
+        )
+    out = POLICIES_LOG_DIR / "evolve_results.json"
+    with out.open("w", encoding="utf-8") as fh:
+        json.dump(results, fh, indent=2)
+    print(f"results written to {out}")
     return 0
 
 

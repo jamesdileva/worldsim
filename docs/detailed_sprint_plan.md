@@ -461,27 +461,192 @@ By end of Sprint 6, the user can:
 ---
 
 ## Phase 4: Evolution (Sprints 19–24)
-> *(Details to be fleshed out post-Milestone 3 — dependent on Phase 3 success metrics)*
+**Goal:** Move from single-policy training to populations of policies that
+are selected, mutated, and evolved across generations — with self-play
+competition and hardened anti-reward-hacking defenses.
 
-**Key Focus Areas:**
-- Generational training across multiple agent populations
-- Strategy mutation and crossover
-- Self-play between competing civilizations
-- Anti-reward-hacking systems
+> **Status note (written after Phase 3):** several roadmap items landed
+> early. Strategy memory exists since Sprint 11; reward-hacking *detection*
+> since Sprint 13; multi-generation dashboards and regression detection since
+> Sprint 18. Phase 4 builds the missing pieces on top of those foundations.
 
 ---
 
-## Phase 5+: Future Phases
-> *(Sprints 25+ will be detailed based on Phase 4 outcomes and user feedback)*
+### Sprint 19 — Populations & Generational Training
 
-**Planned Additions:**
-- Ollama/LLM strategic reasoning integration
-- Technology trees & civilization eras
-- Advanced warfare & diplomacy
-- God Mode enhancements (nukes, terrain manipulation)
-- Advanced visualization (3D, AI-generated graphics)
-- Distributed training and community experiments
+**Duration:** 1 week
+**Deliverable:** A population manager that trains N policies per generation
+across disjoint world-seed sets, tracks lineage in the registry, and selects
+the generation champion.
 
-Next Steps:
-1. Start Sprint 1 — generate the world grid and get that CLI working
-2. After Milestone 1 (end of Sprint 6), we'll detail Phase 4+ sprints based on what actually emerges
+**Tasks:**
+- `PopulationManager`: N candidate policies per generation, each trained on a
+  distinct seed subset (parallel pipeline reused)
+- Lineage tracking: parent generation + seed assignment stored per candidate
+- Champion selection by mean evaluation return across the population's eval
+  seeds; champion registered as the generation's official checkpoint
+- CLI: `rl evolve --population 4 --generations 3 --timesteps-per-candidate T`
+
+**Acceptance criteria:**
+- Population of 4 candidates × 2+ generations trains without crashes
+- Registry records parent/lineage per candidate
+- Champion selection is deterministic given identical results
+
+---
+
+### Sprint 20 — Selection, Mutation & Strategy Evolution
+
+**Duration:** 1–2 weeks
+**Deliverable:** Evolutionary pressure — candidates derived from the previous
+champion via parameter-space mutation, plus strategy-level evolution.
+
+**Tasks:**
+- Parameter mutation: Gaussian noise injection into policy weights (strength
+  configurable), preserving network topology
+- Elitism: champion always survives to the next generation unchanged
+- Mutation lineages recorded (parent checksum → child checksum)
+- Strategy-evolution report: how archetype behavior mixes shift across
+  generations (uses Sprint 11 labels)
+
+**Acceptance criteria:**
+- Mutated children load and run identically-shaped networks
+- Elite never regresses below its recorded score within a generation
+- Lineage chains are queryable end-to-end (root → … → current)
+
+---
+
+### Sprint 21 — Cross-Generation Learning
+
+**Duration:** 1 week
+**Deliverable:** Knowledge transfer between generations beyond raw weights.
+
+**Tasks:**
+- Strategy memory aggregation: merge per-generation EMA action-reward tables
+  into a population-level prior consumed at reset
+- Curriculum seeding: later generations train on world-seed distributions
+  weighted toward earlier failures (regression seeds first)
+
+**Acceptance criteria:**
+- Aggregated priors demonstrably change early-episode behavior
+- Failure-weighted curricula measurably reduce regressions on previously
+  failing seeds vs uniform sampling
+
+---
+
+### Sprint 22 — Self-Play / Civilization Competition
+
+**Duration:** 2 weeks
+**Deliverable:** Two or more learned policies competing inside one world.
+
+**Tasks:**
+- Multi-controller env support: k settlements driven by k distinct policies
+- Head-to-head evaluation mode (policy A vs policy B, paired worlds)
+- Competitive metrics: relative survival, territory share, resource share
+- Update `rl compare` to use true head-to-head instead of baseline deltas
+
+**Acceptance criteria:**
+- Two policies co-exist in one world without controller interference
+- Head-to-head results are deterministic under fixed seeds
+- `training_runs` records head-to-head matches
+
+---
+
+### Sprint 23 — Strategy Discovery
+
+**Duration:** 1–2 weeks
+**Deliverable:** The system surfaces strategies nobody scripted.
+
+**Tasks:**
+- Behavioral clustering over rollout trajectories (building mix, action
+  histograms) to detect emergent play styles
+- Novelty detection: flag behaviors not matching any known label/archetype
+- Discovery log: named strategies persisted with exemplar seeds/checkpoints
+- Integration with Sprint 11 labels as weak supervision
+
+**Acceptance criteria:**
+- At least one reproducible non-scripted strategy identified and documented
+- Discovered strategies re-instantiable from stored exemplars
+
+---
+
+### Sprint 24 — Anti-Reward-Hacking Systems
+
+**Duration:** 1 week
+**Deliverable:** Beyond Sprint 13's detection: automated response.
+
+**Tasks:**
+- Automated response ladder: warn → penalize (reward scaling) → quarantine
+  (reject candidate from selection)
+- Exploit regression suite: known exploits replayed as tests
+- Hacking telemetry added to dashboard output
+
+**Acceptance criteria:**
+- A seeded synthetic exploiter is automatically quarantined
+- Known-exploit replays fail loudly in CI (slow tier)
+
+---
+
+## Phase 5: AI Reasoning (Sprints 25–30)
+**Goal:** Optional Ollama-backed strategic reasoning layered ON TOP of ML —
+LLMs advise; deterministic simulation and validated actions remain law.
+*Detailed scoping happens when Phase 4 completes.*
+
+| Sprint | Theme | Notes |
+|---|---|---|
+| 25 | Ollama integration | Local server client, health/timeouts, model config |
+| 26 | Settlement state summarization | Compact world/settlement summaries for prompts |
+| 27 | Strategic reasoning | Advice generation from summaries |
+| 28 | LLM → agent intent → validated actions | Advice maps onto the frozen 62-action space; validation mandatory |
+| 29 | Periodic AI reasoning | Budget-aware scheduling (every N ticks / events) |
+| 30 | ML-only vs ML + LLM comparison | Paired benchmark methodology reused |
+
+## Phase 6: Civilization Simulation (Sprints 31–37)
+**Goal:** Depth — technology/eras, advanced economies, warfare, long-horizon
+history. Several items extend existing systems (diplomacy, collapse).
+
+| Sprint | Theme | Notes |
+|---|---|---|
+| 31 | Technology & civilization eras | Tech tree, era gates on buildings/actions |
+| 32 | Advanced economies | Markets/prices beyond fixed trade units |
+| 33 | Large-scale infrastructure | Project-scale construction, road networks spanning worlds |
+| 34 | Advanced diplomacy | Treaties with clauses, federations (extends S10) |
+| 35 | Warfare proper | Units, battles, sieges (raids exist since S9) |
+| 36 | Collapse/recovery depth | Extends S5 ruins/happiness with era mechanics |
+| 37 | Long-term historical simulation | Stability + performance at 100k+ ticks |
+
+## Phase 7: God Mode Expansion (Sprints 38–43)
+**Status:** Core God Mode shipped in Sprint 6 (controls, disasters,
+resource manipulation, event logging). Remaining sprints are expansions:
+
+| Sprint | Theme | Notes |
+|---|---|---|
+| 38 | God controls polish | Full surface area audit vs §16 of architecture doc |
+| 39 | Disaster toolkit | Manual disaster authoring (beyond random events) |
+| 40 | Resource manipulation depth | Spawn/remove/bless at scale, region targeting |
+| 41 | Terrain manipulation | Terraform tiles (terrain is currently static) |
+| 42 | Nuclear events | Mass destruction with lasting contamination |
+| 43 | Timeline branching / undo | Branch snapshots into independent timelines |
+
+## Phase 8: Living World (Sprints 44–50)
+Visualization and observability: PixiJS/WebGL frontend (architecture_notes
+stack), civilization histories, event timeline UI, learning-dashboard UI,
+replay system, world comparison UIs, long-running autonomous world service.
+*The Electron/React shell decision is deferred until this phase begins;
+CLI remains the primary interface until then (decided Session 12).*
+
+## Phase 9: Advanced Intelligence (Sprints 51–56)
+Population-based training at scale, meta-learning across worlds, strategy
+transfer between civilizations, deeper agent specialization, multi-level
+agents (civilization ↔ settlement hierarchies), self-improving strategies.
+*Depends on Phase 4's evolution infrastructure being proven.*
+
+## Phase 10: Experimental / Future (Sprint 57+)
+Procedural 3D worlds, AI-generated assets, massive parallel worlds,
+distributed training, community worlds/shared experiments. Explicitly
+non-goal until everything above stabilizes.
+
+---
+
+## Next Steps
+1. ~~Start Sprint 1~~ ✅ Phases 1–3 complete (Sprints 1–18 + remediation)
+2. Proceed sprint-by-sprint through Phase 4 starting at Sprint 19

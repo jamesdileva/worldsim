@@ -5,6 +5,60 @@ Decisions worth remembering are marked **[DECISION]**.
 
 ---
 
+## Session 21 — 2026-08-20 — Sprint Docs Expansion + Sprint 19: Populations & Generational Training
+
+### Part 1 — Roadmap docs expanded
+
+`docs/detailed_sprint_plan.md` previously stopped at Sprint 18 detail with a
+"Phase 4+ fleshed out later" placeholder. Now contains detailed plans for
+**Phases 4–10 (Sprints 19–57+)** derived from `architecture_and_roadmap.md`,
+reconciled against current reality:
+- Phase 4 sprints carry full tasks/acceptance criteria; Phases 5–7 as themed
+  tables (scoping deferred until their phase starts); Phase 8 notes the
+  Electron/UX decision stays deferred (CLI-first, decided Session 12)
+- Divergences documented: strategy memory (S11), hacking detection (S13),
+  dashboards (S18), God Mode core (S6) landed ahead of their roadmap slots
+- Sprint 24 reframed: detection exists; remaining work is the RESPONSE
+  ladder (warn → penalize → quarantine)
+
+### Part 2 — Sprint 19: Populations & Generational Training
+
+- `population.py` —
+  - `train_population()`: N candidates per generation on disjoint world
+    seeds (`seed_base + gen_index*9973 + i*101`), each registered under
+    `{gen}_c{i}` with checksums
+  - `select_champion()`: highest mean training return, deterministic
+    first-candidate tie-break
+  - `promote_champion()`: champion checkpoint copied to bare `{gen}` label
+    so existing tools (`rl dashboard`, `rl compare`, `--policy-id`) work
+    unchanged
+  - `evolve()`: multi-generation loop with parent lineage chain
+  - accepts external `db_store` for isolated registries (tests)
+- `db.py` — `policy_checkpoints.parent` column (+ migration) records lineage
+- CLI — `rl evolve --population N --generations G --timesteps-per-candidate T`
+- Tests: 6 new (champion selection/registration/lineage/deterministic seeds/
+  parent chain/schema migration). Fast suite: 257 passing.
+
+### Decisions
+
+- **[DECISION] Champion selection by mean training return** for Sprint 19;
+  validation-world evaluation as selector is a Sprint 20 refinement.
+- **[DECISION] Champion promoted to bare generation label via file copy +
+  new registry row** — downstream tools never learn about candidate labels.
+- **[DECISION] Per-generation seed offsets from label digits** — stable,
+  disjoint per candidate, reproducible across runs.
+
+### Verification
+
+```
+rl evolve --population 2 --generations 2 --timesteps-per-candidate 1024:
+  gen1 champion gen1_c0 (return 0.95, parent=None)
+  gen2 champion gen2_c1 (return 1.1992, parent=gen1)
+  evolve_results.json persisted
+```
+
+---
+
 ## Session 20 — 2026-08-20 — Learning Remediation (entropy fix, reward rebalance, controlled cohort)
 
 **Scope:** Sprint 18 follow-ups as one coherent piece: entropy capture fix,
