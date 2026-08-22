@@ -87,11 +87,12 @@ def roll_event(
             chosen = t
             break
     duration = DROUGHT_DURATION_TICKS if chosen == DisasterType.DROUGHT else 1
-    margin = DISASTER_RADIUS + 1
+    # Margin clamped for small worlds (training uses 32-tile grids).
+    margin = min(DISASTER_RADIUS + 1, max(1, size // 2))
     return DisasterEvent(
         type=chosen,
-        center_x=rng.randint(margin, size - margin),
-        center_y=rng.randint(margin, size - margin),
+        center_x=rng.randint(margin, max(margin, size - margin)),
+        center_y=rng.randint(margin, max(margin, size - margin)),
         start_tick=tick,
         duration=duration,
         # Deterministic id so identical runs produce identical events (A4).

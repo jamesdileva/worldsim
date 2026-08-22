@@ -12,6 +12,7 @@ dependencies = [
     "opensimplex>=0.4.5",
     "gymnasium>=0.29",
     "matplotlib>=3.8",
+    "stable-baselines3>=2.3",
 ]
 
 [project.optional-dependencies]

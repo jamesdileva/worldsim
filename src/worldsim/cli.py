@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 import uuid
+from pathlib import Path
 
 from .actions import Action, action_category
 from .clock import describe
@@ -172,6 +174,31 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Optional output .png path for a reward-over-time plot",
     )
+    train_p = rl_sub.add_parser("train", help="Train PPO on WorldSimEnv")
+    train_p.add_argument("--timesteps", type=int, default=50_000,
+                         help="Total training timesteps")
+    train_p.add_argument("--seed", type=int, default=42, help="Base seed")
+    train_p.add_argument("--size", type=int, default=64,
+                        help="World size for training (small = faster)")
+    train_p.add_argument("--settlements", type=int, default=3)
+    train_p.add_argument("--max-ticks", type=int, default=1000)
+    train_p.add_argument(
+        "--generation", default="gen1", help="Checkpoint generation label"
+    )
+    train_p.add_argument(
+        "--save-dir", default="data/world_sim/policies",
+        help="Directory for checkpoints and logs",
+    )
+    eval_p = rl_sub.add_parser(
+        "evaluate", help="Paired evaluation: trained policy vs rule-based"
+    )
+    eval_p.add_argument("--model", required=True,
+                       help="Path to SB3 checkpoint (.zip)")
+    eval_p.add_argument("--worlds", type=int, default=10)
+    eval_p.add_argument("--first-seed", type=int, default=50_000)
+    eval_p.add_argument("--ticks", type=int, default=3000)
+    eval_p.add_argument("--size", type=int, default=256)
+    eval_p.add_argument("--settlements", type=int, default=5)
     return parser
 
 
@@ -598,6 +625,77 @@ def cmd_benchmark(args: argparse.Namespace) -> int:
 
 
 def cmd_rl(args: argparse.Namespace) -> int:
+    if args.rl_command == "train":
+        return _cmd_rl_train(args)
+    if args.rl_command == "run":
+        return _cmd_rl_run(args)
+    if args.rl_command == "evaluate":
+        return _cmd_rl_evaluate(args)
+    print(f"unknown rl command: {args.rl_command}", file=sys.stderr)
+    return 2
+
+
+def _cmd_rl_train(args: argparse.Namespace) -> int:
+    from .db import WorldStore
+    from .training import train
+
+    save_dir = Path(args.save_dir)
+    summary = train(
+        total_timesteps=args.timesteps,
+        seed=args.seed,
+        size=args.size,
+        num_settlements=args.settlements,
+        max_ticks=args.max_ticks,
+        save_path=save_dir / f"policy_{args.generation}",
+        log_path=save_dir / "train_log.jsonl",
+        verbose=0,
+    )
+    store = WorldStore(DEFAULT_DB_PATH)
+    try:
+        store.insert_policy_checkpoint({
+            "generation": args.generation,
+            "path": summary["checkpoint_path"],
+            "total_timesteps": summary["total_timesteps"],
+            "episodes": summary.get("episodes"),
+            "mean_episode_return": summary.get("mean_return"),
+            "wall_time_seconds": summary.get("wall_time_seconds"),
+        })
+    finally:
+        store.close()
+    print(json.dumps(summary, indent=2))
+    print(f"checkpoint recorded in policy_checkpoints table")
+    return 0
+
+
+def _cmd_rl_evaluate(args: argparse.Namespace) -> int:
+    from .training import evaluate_vs_baseline
+
+    results = evaluate_vs_baseline(
+        model_path=args.model,
+        num_worlds=args.worlds,
+        first_seed=args.first_seed,
+        ticks=args.ticks,
+        size=args.size,
+        num_settlements=args.settlements,
+    )
+    print(
+        f"\nEvaluation over {results['worlds']} worlds:\n"
+        f"  policy wins (strict survival): {results['policy_wins']} "
+        f"({results['win_fraction_strict']*100:.0f}%)\n"
+        f"  ties: {results['ties']}\n"
+        f"  mean baseline survival: {results['mean_baseline_survival']} ticks\n"
+        f"  mean policy survival:   {results['mean_policy_survival']} ticks\n"
+        f"  mean peak pop — baseline {results['mean_baseline_peak_pop']:.0f} "
+        f"vs policy {results['mean_policy_peak_pop']:.0f}"
+    )
+    out = Path(args.model).parent / "eval_results.json"
+    with out.open("w", encoding="utf-8") as fh:
+        json.dump(results, fh, indent=2)
+    print(f"results written to {out}")
+    return 0
+
+
+def _cmd_rl_run(args: argparse.Namespace) -> int:
     """Headless episode runner over WorldSimEnv with a random policy."""
     import numpy as np
 

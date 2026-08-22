@@ -120,6 +120,19 @@ CREATE TABLE IF NOT EXISTS world_events (
     actor_ids TEXT NOT NULL,
     description TEXT NOT NULL
 );
+
+-- Trained policy checkpoints (Sprint 14).
+CREATE TABLE IF NOT EXISTS policy_checkpoints (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    generation TEXT NOT NULL,
+    path TEXT NOT NULL,
+    algorithm TEXT NOT NULL DEFAULT 'PPO',
+    total_timesteps INTEGER NOT NULL,
+    episodes INTEGER,
+    mean_episode_return REAL,
+    wall_time_seconds REAL,
+    created_at TEXT NOT NULL
+);
 """
 
 
@@ -728,6 +741,28 @@ class WorldStore:
                     metrics["food_final"],
                     metrics["wood_final"],
                     metrics["stone_final"],
+                    created_at,
+                ),
+            )
+        return int(cur.lastrowid)
+
+    def insert_policy_checkpoint(self, metrics: dict) -> int:
+        """Store a trained policy checkpoint record (Sprint 14)."""
+        created_at = datetime.now(timezone.utc).isoformat()
+        with self._conn:
+            cur = self._conn.execute(
+                "INSERT INTO policy_checkpoints "
+                "(generation, path, algorithm, total_timesteps, episodes, "
+                "mean_episode_return, wall_time_seconds, created_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    metrics.get("generation", "gen1"),
+                    metrics["path"],
+                    metrics.get("algorithm", "PPO"),
+                    metrics["total_timesteps"],
+                    metrics.get("episodes"),
+                    metrics.get("mean_episode_return"),
+                    metrics.get("wall_time_seconds"),
                     created_at,
                 ),
             )

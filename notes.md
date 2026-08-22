@@ -5,6 +5,98 @@ Decisions worth remembering are marked **[DECISION]**.
 
 ---
 
+## Session 15 — 2026-08-20 — Sprint 14: First Learning Agent (PPO)
+
+**Scope:** Phase 3 / Sprint 14 — Stable-Baselines3 PPO on WorldSimEnv,
+training script with metrics logging, first checkpoint
+(`policy_gen1`), paired evaluation vs rule-based baseline.
+
+### What was built
+
+- `training.py` —
+  - `EpisodeMetricsCallback`: SB3-native `BaseCallback` capturing
+    per-episode returns/lengths (via Monitor's `info["episode"]`) and
+    policy/value losses + entropy (via logger), JSONL-logged per episode
+  - `train()`: PPO(MlpPolicy, net_arch [128,128]) over a Monitor-wrapped
+    WorldSimEnv; saves checkpoint `.zip` + `_summary.json`
+  - `evaluate_vs_baseline()`: paired A/B on identical world seeds —
+    settlement 0 under trained policy vs the same settlement rule-based;
+    compares survival ticks + peak population; writes eval_results.json
+- `db.py` — `policy_checkpoints` table + insert API
+- CLI — `rl train --timesteps --generation --size ...` and
+  `rl evaluate --model ... --worlds ...`; both wired into policy registry
+- Tests: 4 new (training smoke, checkpoint load+predict round-trip,
+  summary JSON, checkpoints table); training tests marked slow where heavy
+- Fast suite: 223 passing
+
+### Decisions
+
+- **[DECISION] Reduced in-session training (20k timesteps, 64-size worlds)**
+  to validate the pipeline honestly; full-scale runs are a CLI command away
+  but take hours at simulation speed.
+- **[DECISION] Paired-per-seed evaluation**: identical worlds, settlement 0
+  differs only by controller — removes world-quality variance from the
+  comparison.
+- **[DECISION] Survival-time is the headline metric per spec**, with peak
+  population as secondary.
+
+### Benchmark results (acceptance check)
+
+```
+Training: 20k timesteps, 149.6s wall, 20 episodes, mean return +25.98,
+          mean policy loss 0.0243 — no crashes ✓
+Checkpoint: policies/policy_gen1.zip + SQLite record ✓
+Evaluation (10 benchmark worlds, 3000 ticks):
+  survival: baseline 3000/3000 vs policy 3000/3000 → 10 ties, 0 wins
+  peak pop: identical per seed (e.g., 135 vs 135)
+  → strict-win fraction: 0% vs required 60% ✗
+```
+
+**Honest finding:** the survival/population metrics are saturated. The
+rule-based baseline never dies (known since Sprint 8), and population
+equilibrium is set by the world's food carrying capacity (~132-135 on these
+seeds) regardless of controller. With no headroom on these metrics, gen1
+cannot demonstrate outperformance — it can only match. Non-negative average
+reward criterion IS met (+25.98 mean return).
+
+### What this means for Phase 3 going forward
+
+1. **Metrics need headroom**: comparisons should use harder worlds
+   (disaster-heavy seeds, resource-scarce spawns, hostile neighbors) or
+   efficiency metrics (food wasted, actions-to-milestone) where controller
+   quality actually moves the needle.
+2. **More training**: 20k timesteps is tiny; the pipeline supports
+   `rl train --timesteps 500000` overnight runs once reward shaping is
+   refined (Sprint 13 machinery is in place).
+3. Reward shaping may need re-balancing so the policy learns strategies
+   beyond matching the food equilibrium (Sprint 13 breakdowns will show
+   which components dominate).
+
+### Known issues / deferred
+
+- Entropy metric not captured (`mean_entropy: None`) — SB3 logs entropy only
+  after first rollout with proper keys; minor, fix when tuning.
+- Evaluation runtime: 10 worlds × 2 runs × 3000 ticks ≈ 40 min — acceptable
+  but batch-parallelizable later (Sprint 15 VecEnv work).
+- Identical peaks across ALL seeds hint that food capacity math dominates —
+  revisit GATHER_RATE/farm caps if worlds feel too same-y.
+
+### Acceptance criteria status
+
+- ✅ PPO trains without crashing (20 episodes, clean losses)
+- ✅ Checkpoint saved (.zip) AND recorded in SQLite `policy_checkpoints`
+- ✅ Trained agent achieves non-negative average reward (+25.98)
+- ⚠️ Outperforms baseline in 60%+ of worlds on survival time: NOT met — all
+  ties (metric saturation, documented above). Revisit with harder
+  evaluation worlds or richer metrics after Sprint 15/16.
+
+### Next up (Sprint 15)
+
+Parallel simulation training: vectorized environments (VecEnv), batching,
+CPU utilization tracking, wall-clock benchmarks per 100 episodes.
+
+---
+
 ## Session 14 — 2026-08-20 — Sprint 13: Reward Refinement, Replay Buffer, Hacking Detection
 
 **Scope:** Phase 3 / Sprint 13 — named reward components, rolling
