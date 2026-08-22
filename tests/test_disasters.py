@@ -295,6 +295,7 @@ def make_settlement():
 # Integration
 # ----------------------------------------------------------------------
 
+@pytest.mark.slow
 def test_simulation_with_disasters_deterministic():
     def run(seed):
         sim, settlements = make_sim(seed=seed, count=3)
@@ -310,6 +311,7 @@ def test_simulation_with_disasters_deterministic():
     assert run(271828) == run(271828)
 
 
+@pytest.mark.slow
 def test_disasters_occur_naturally_over_long_run():
     sim, _ = make_sim(seed=999, count=2)
     for _ in range(3000):

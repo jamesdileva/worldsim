@@ -96,6 +96,7 @@ def test_step_advances_exactly_n_ticks(db, capsys):
     assert "from tick 101 to 111" in out
 
 
+@pytest.mark.slow
 def test_step_preserves_continuation_determinism(db):
     """Stepping a saved world must match an uninterrupted run."""
     main(["save", "--seed", "99", "--ticks", "150",
@@ -133,6 +134,7 @@ def test_load_missing_world_fails(db):
 # Auto-save
 # ----------------------------------------------------------------------
 
+@pytest.mark.slow
 def test_autosave_writes_snapshots_at_interval(tmp_path, capsys):
     db = str(tmp_path / "auto.db")
     rc = main(["simulate", "--seed", "12345", "--ticks", "1000",

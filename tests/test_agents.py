@@ -154,6 +154,7 @@ def test_rule_based_agent_builds_farm_on_deficit():
     assert action == int(Action.BUILD_FARM)
 
 
+@pytest.mark.slow
 def test_rule_based_agent_survives_long_run():
     sim, settlements = make_sim(seed=12345, count=3)
     for _ in range(1500):
@@ -234,6 +235,7 @@ def test_action_counts_tracked():
 # Integration determinism
 # ----------------------------------------------------------------------
 
+@pytest.mark.slow
 def test_agent_driven_simulation_deterministic():
     def run(seed):
         sim, settlements = make_sim(seed=seed, count=3)

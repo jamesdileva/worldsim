@@ -214,10 +214,26 @@ class Simulation:
     _interacted_this_tick: set[str] = field(default_factory=set)
     # Sprint 11: strategy memory — EMA reward per (archetype, action_id).
     strategy_memory: dict[tuple[str, int], float] = field(default_factory=dict)
+    # Perf: per-tick memo for full-grid scans (buildings/territory/roads).
+    _tick_cache: dict = field(default_factory=dict)
+    _cache_tick: int = -1
 
     @property
     def tick(self) -> int:
         return self.world.tick
+
+    def _cached(self, key: tuple, fn):
+        """Per-tick memo for expensive full-grid scans. Cleared at tick
+        start and on any world mutation, so values are never stale."""
+        if self._cache_tick != self.world.tick:
+            self._tick_cache.clear()
+            self._cache_tick = self.world.tick
+        if key not in self._tick_cache:
+            self._tick_cache[key] = fn()
+        return self._tick_cache[key]
+
+    def _invalidate_cache(self) -> None:
+        self._tick_cache.clear()
 
     # ------------------------------------------------------------------
     # Spawning
@@ -371,6 +387,7 @@ class Simulation:
                             candidates.append((ny, nx))
         for y, x in candidates:
             ownership[y, x] = idx
+        self._invalidate_cache()
         return candidates
 
     def claim_territory(self, settlement: Settlement) -> list[tuple[int, int]]:
@@ -380,7 +397,9 @@ class Simulation:
 
     def territory_of(self, settlement: Settlement) -> list[tuple[int, int]]:
         idx = self.settlements.index(settlement)
-        return [tuple(t) for t in np.argwhere(self.world.ownership == idx)]
+        return self._cached(("terr", idx), lambda: [
+            tuple(t) for t in np.argwhere(self.world.ownership == idx)
+        ])
 
     def release_territory(self, settlement: Settlement) -> None:
         idx = self.settlements.index(settlement)
@@ -388,6 +407,7 @@ class Simulation:
         # Buildings/roads on lost tiles are destroyed (Sprint 3 acceptance).
         self.world.improvements[mask] = Improvement.NONE.value
         self.world.ownership[mask] = UNOWNED
+        self._invalidate_cache()
 
     # ------------------------------------------------------------------
     # Buildings & roads
@@ -472,6 +492,7 @@ class Simulation:
         self._pay(settlement, spec.cost_wood, spec.cost_stone)
         improvement = Improvement(building_type.value + 1)
         self.world.improvements[y, x] = improvement.value
+        self._invalidate_cache()
         return True
 
     def destroy_building(self, x: int, y: int) -> bool:
@@ -479,20 +500,22 @@ class Simulation:
         if self.world.improvements[y, x] == Improvement.NONE.value:
             return False
         self.world.improvements[y, x] = Improvement.NONE.value
+        self._invalidate_cache()
         return True
 
     def buildings_of(self, settlement: Settlement) -> dict[BuildingType, int]:
-        """Counts per building type for a settlement."""
-        owned = self._owned_mask(settlement)
-        counts: dict[BuildingType, int] = {}
-        for btype in BuildingType:
-            imp = Improvement(btype.value + 1)
-            counts[btype] = int(
+        """Counts per building type for a settlement (cached per tick)."""
+        idx = self.settlements.index(settlement)
+        return self._cached(("bld", idx), lambda: {
+            btype: int(
                 np.logical_and(
-                    owned, self.world.improvements == imp.value
+                    self._owned_mask(settlement),
+                    self.world.improvements
+                    == Improvement(btype.value + 1).value,
                 ).sum()
             )
-        return counts
+            for btype in BuildingType
+        })
 
     def enqueue_build(self, settlement: Settlement, btype: BuildingType) -> None:
         settlement.build_queue.append(btype.name)
@@ -549,16 +572,20 @@ class Simulation:
             return False
         self._pay(settlement, 0, ROAD_COST_STONE)
         self.world.improvements[y, x] = Improvement.ROAD.value
+        self._invalidate_cache()
         return True
 
     def roads_of(self, settlement: Settlement) -> set[tuple[int, int]]:
-        owned = self._owned_mask(settlement)
-        road_tiles = np.argwhere(
-            np.logical_and(
-                owned, self.world.improvements == Improvement.ROAD.value
+        idx = self.settlements.index(settlement)
+        return self._cached(("road", idx), lambda: {
+            (int(y), int(x))
+            for y, x in np.argwhere(
+                np.logical_and(
+                    self.world.ownership == idx,
+                    self.world.improvements == Improvement.ROAD.value,
+                )
             )
-        )
-        return {(int(y), int(x)) for y, x in road_tiles}
+        })
 
     def road_connectivity(
         self, settlement: Settlement
@@ -848,6 +875,7 @@ class Simulation:
         )
         count = int(burned.sum())
         self.world.improvements[burned] = Improvement.NONE.value
+        self._invalidate_cache()
         return count
 
     def _apply_plague(self, event: DisasterEvent) -> None:
@@ -1365,40 +1393,52 @@ class Simulation:
 
     def _produce_resources(self, settlement: Settlement) -> None:
         """Add building output (with raid debuffs) + passive gathering to the
-        inventory."""
+        inventory. Vectorized via bincounts; debuffs stay per-tile."""
         idx = self.settlements.index(settlement)
         owned = self.world.ownership == idx
         produced = {"wood": 0.0, "stone": 0.0, "metal": 0.0}
-        for btype in BuildingType:
-            imp = Improvement(btype.value + 1)
-            tiles = np.argwhere(
-                np.logical_and(
-                    owned, self.world.improvements == imp.value
-                )
+        # Fast path: no active debuffs -> pure bincount, no per-tile loops.
+        if not self.building_debuffs:
+            imp_counts = np.bincount(
+                self.world.improvements[owned].astype(np.int64) + 1,
+                minlength=6,
             )
-            if len(tiles) == 0:
-                continue
-            spec = BUILDING_SPECS[btype]
-            for y, x in tiles:
-                mult = self._debuff_multiplier(int(x), int(y))
-                produced["wood"] += spec.wood_output * mult
-                produced["stone"] += spec.stone_output * mult
-                produced["metal"] += spec.metal_output * mult
-        # Passive gathering: fraction of terrain yields on owned tiles.
-        terrain_grid = self.world.terrain
-        for res_name, attr in (("wood", "wood"), ("stone", "stone"), ("metal", "metal")):
-            trickle = 0.0
-            for tt in TerrainType:
-                per_tile = getattr(TERRAIN_PROFILES[tt], attr)
-                if per_tile <= 0:
+            for btype in BuildingType:
+                count = int(imp_counts[btype.value + 2])
+                if count == 0:
                     continue
-                tiles = int(
+                spec = BUILDING_SPECS[btype]
+                produced["wood"] += spec.wood_output * count
+                produced["stone"] += spec.stone_output * count
+                produced["metal"] += spec.metal_output * count
+        else:
+            for btype in BuildingType:
+                imp = Improvement(btype.value + 1)
+                tiles = np.argwhere(
                     np.logical_and(
-                        owned, terrain_grid == tt.value
-                    ).sum()
+                        owned, self.world.improvements == imp.value
+                    )
                 )
-                trickle += tiles * per_tile * GATHER_RATE
-            produced[res_name] += trickle
+                if len(tiles) == 0:
+                    continue
+                spec = BUILDING_SPECS[btype]
+                for y, x in tiles:
+                    mult = self._debuff_multiplier(int(x), int(y))
+                    produced["wood"] += spec.wood_output * mult
+                    produced["stone"] += spec.stone_output * mult
+                    produced["metal"] += spec.metal_output * mult
+        # Passive gathering: one bincount over terrain composition.
+        terrain_counts = np.bincount(
+            self.world.terrain[owned], minlength=len(TerrainType)
+        )
+        for i, tt in enumerate(TerrainType):
+            profile = TERRAIN_PROFILES[tt]
+            n = int(terrain_counts[i])
+            if n == 0:
+                continue
+            produced["wood"] += n * profile.wood * GATHER_RATE
+            produced["stone"] += n * profile.stone * GATHER_RATE
+            produced["metal"] += n * profile.metal * GATHER_RATE
         inv = settlement.resource_inventory
         for res, amount in produced.items():
             inv[res] = inv.get(res, 0.0) + amount

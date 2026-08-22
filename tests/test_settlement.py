@@ -1,4 +1,5 @@
 import numpy as np
+import pytest
 
 from worldsim.settlement import (
     FOOD_PER_WORKER_PER_TICK,
@@ -192,6 +193,7 @@ def test_name_generator_seeded():
     assert generate_name(1).isalpha()
 
 
+@pytest.mark.slow
 def test_full_lifecycle_growth_then_stability():
     sim, s = make_sim(seed=2024)
     for _ in range(240):  # 10 growth intervals' worth of ticks

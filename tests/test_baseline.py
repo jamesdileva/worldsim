@@ -171,6 +171,7 @@ def test_epsilon_rate_approximately_10_percent():
 # Benchmark infrastructure
 # ----------------------------------------------------------------------
 
+@pytest.mark.slow
 def test_benchmark_cli_runs_and_logs_metrics(tmp_path):
     from worldsim.cli import main
 

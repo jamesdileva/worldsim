@@ -208,6 +208,7 @@ def test_strategy_memory_persists():
 # Integration
 # ----------------------------------------------------------------------
 
+@pytest.mark.slow
 def test_specialization_run_deterministic():
     def run(seed):
         sim, settlements = make_sim(seed=seed, count=4)

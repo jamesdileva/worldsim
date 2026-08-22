@@ -59,6 +59,7 @@ def test_no_territory_overlap_at_spawn():
     assert total_owned == 27
 
 
+@pytest.mark.slow
 def test_all_settlements_grow_independently():
     sim, settlements = make_sim(seed=11, count=3)
     start_pops = [s.population for s in settlements]
@@ -70,6 +71,7 @@ def test_all_settlements_grow_independently():
         assert s.population > start_pops[sim.settlements.index(s)] - 10
 
 
+@pytest.mark.slow
 def test_multi_settlement_simulation_deterministic():
     def run(seed):
         sim, settlements = make_sim(seed=seed, count=3)

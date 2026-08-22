@@ -13,6 +13,12 @@ from .tiles import ASCII_GLYPHS, TERRAIN_PROFILES, TerrainType
 DEFAULT_SIZE = 256
 UNOWNED = -1
 
+# Terrain generation cache: opensimplex sampling is pure-Python (~3 s per
+# world); identical (seed, size) requests reuse the generated arrays (copied
+# so sim mutations never poison the cache).
+_GENERATION_CACHE: dict[tuple[int, int], tuple] = {}
+_GENERATION_CACHE_MAX = 64
+
 
 @dataclass
 class World:
@@ -26,15 +32,32 @@ class World:
     ownership: np.ndarray = field(init=False)
     # Tile improvements (roads, buildings): Improvement enum values.
     improvements: np.ndarray = field(init=False)
+    _food_grid: np.ndarray | None = field(init=False, default=None)
 
     def __post_init__(self) -> None:
-        self.elevation = terrain._noise_grid(
-            self.seed, self.size, terrain.ELEVATION_SEED_OFFSET, scale=6.0
-        )
-        self.moisture = terrain._noise_grid(
-            self.seed, self.size, terrain.MOISTURE_SEED_OFFSET, scale=5.0
-        )
-        self.terrain = terrain.classify(self.elevation, self.moisture)
+        key = (self.seed, self.size)
+        cached = _GENERATION_CACHE.get(key)
+        if cached is not None:
+            self.elevation, self.moisture, self.terrain = (
+                cached[0].copy(),
+                cached[1].copy(),
+                cached[2].copy(),
+            )
+        else:
+            self.elevation = terrain._noise_grid(
+                self.seed, self.size, terrain.ELEVATION_SEED_OFFSET, scale=6.0
+            )
+            self.moisture = terrain._noise_grid(
+                self.seed, self.size, terrain.MOISTURE_SEED_OFFSET, scale=5.0
+            )
+            self.terrain = terrain.classify(self.elevation, self.moisture)
+            if len(_GENERATION_CACHE) >= _GENERATION_CACHE_MAX:
+                _GENERATION_CACHE.clear()
+            _GENERATION_CACHE[key] = (
+                self.elevation.copy(),
+                self.moisture.copy(),
+                self.terrain.copy(),
+            )
         self.ownership = np.full((self.size, self.size), UNOWNED, dtype=np.int32)
         self.improvements = np.full(
             (self.size, self.size), Improvement.NONE.value, dtype=np.int8
@@ -65,12 +88,17 @@ class World:
         return totals
 
     def food_yield_grid(self) -> np.ndarray:
-        """Per-tile food yield as an int array."""
-        yields = np.array(
-            [TERRAIN_PROFILES[TerrainType(t)].food for t in range(len(TerrainType))],
-            dtype=np.int32,
-        )
-        return yields[self.terrain]
+        """Per-tile food yield as an int array (cached; terrain is static)."""
+        if self._food_grid is None:
+            yields = np.array(
+                [
+                    TERRAIN_PROFILES[TerrainType(t)].food
+                    for t in range(len(TerrainType))
+                ],
+                dtype=np.int32,
+            )
+            self._food_grid = yields[self.terrain]
+        return self._food_grid
 
     def terrain_breakdown(self) -> dict[TerrainType, int]:
         counts = np.bincount(self.terrain.ravel(), minlength=len(TerrainType))

@@ -342,6 +342,7 @@ def test_event_log_serialized_in_snapshot():
         store.close()
 
 
+@pytest.mark.slow
 def test_multi_settlement_competition_run_deterministic():
     def run(seed):
         sim, settlements = make_sim(seed=seed, count=5)

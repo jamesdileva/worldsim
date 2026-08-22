@@ -22,3 +22,7 @@ where = ["src"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = [
+    "slow: long-running integration tests (benchmarks, multi-hundred-tick simulations)",
+]
+addopts = "-m 'not slow'"
