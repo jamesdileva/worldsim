@@ -21,9 +21,11 @@ emergent strategies — all reproducible from a single seed.
 Stable-Baselines3 (PPO) + matplotlib + psutil + scipy.
 
 **Status:** Phase 1 ✅ (Milestone 1 "Living Ant Farm"), Phase 2 ✅
-(specialization/emergence), Phase 3 in progress (Sprint 16 done).
+(specialization/emergence), Phase 3 in progress (Sprint 18 done —
+measurement tooling complete; learning improvement NOT yet demonstrated,
+see honest finding below).
 
-**Test tiers:** `pytest` = fast suite (~250 tests, ~2–5 min);
+**Test tiers:** `pytest` = fast suite (~250 tests, ~3–5 min);
 `pytest -m slow` = long integration runs.
 
 ---
@@ -50,6 +52,8 @@ Stable-Baselines3 (PPO) + matplotlib + psutil + scipy.
 | `0792256` | 14 | PPO training pipeline, metrics callback, checkpoints, paired eval |
 | `8617711` | 15 | SubprocVecEnv parallel training (×2.26 @ 4 workers), CPU tracking |
 | `1dbe0b4` | 16 | Policy checksums, registry resolution (`--policy-id`), training_runs, rl compare |
+| `923cb40` | 17 | Difficulty knobs, shared reward measurement, Wilcoxon/permutation significance, evaluation reports |
+| `ab780ec` | 18 | Multi-generation dashboard, learning curves, per-seed regression detection |
 
 ---
 
@@ -120,6 +124,21 @@ Agents replace auto-rules; the frozen RL contract is born
   routes/reward), Wilcoxon + permutation significance testing, markdown/PNG
   reports via `rl evaluate --report --chart`.
 - Verified end-to-end on hard worlds; survival still ties honestly.
+
+### Session 19 — Sprint 18 (this session)
+- gen2 (40k) + gen3 (80k) trained via parallel pipeline; multi-generation
+  dashboard (`rl dashboard --gens --metric --plot`) with monotonicity and
+  per-seed regression detection.
+- **Honest finding (Sprint 18):** gen3 REGRESSED vs gen1 (survival 1009 vs
+  1500 ticks; peak pop 49 vs 71; regressions on 3 of 4 seeds) despite the
+  highest training return — more training ≠ better policy under current
+  reward shaping and uncontrolled cross-generation configs. Detection
+  tooling works exactly as intended; improvement does not yet exist.
+- **[WHY] Dashboard supports three metrics** (survival/reward/peak-pop):
+  survival saturates, so learning curves need metrics with headroom.
+- Follow-ups: entropy capture fix (currently None), controlled training
+  configs across generations, longer runs, reward-shaping rebalance guided
+  by Sprint 13 component breakdowns.
 
 ---
 
