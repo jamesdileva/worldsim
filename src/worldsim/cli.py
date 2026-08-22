@@ -234,6 +234,27 @@ def build_parser() -> argparse.ArgumentParser:
     cmp_p.add_argument("--ticks", type=int, default=3000)
     cmp_p.add_argument("--size", type=int, default=256)
     cmp_p.add_argument("--settlements", type=int, default=5)
+
+    dash = rl_sub.add_parser(
+        "dashboard",
+        help="Learning-curve dashboard across policy generations (Sprint 18)",
+    )
+    dash.add_argument("--gens", default="gen1,gen2,gen3",
+                      help="Comma-separated generation labels in order")
+    dash.add_argument(
+        "--metric", default="survival",
+        choices=["survival", "reward", "peak_population"],
+        help="Primary metric for the learning curve",
+    )
+    dash.add_argument("--worlds", type=int, default=10)
+    dash.add_argument("--first-seed", type=int, default=50_000)
+    dash.add_argument("--ticks", type=int, default=3000)
+    dash.add_argument("--size", type=int, default=256)
+    dash.add_argument("--settlements", type=int, default=5)
+    dash.add_argument(
+        "--plot", default=None,
+        help="Optional learning-curve .png output path",
+    )
     return parser
 
 
@@ -668,6 +689,8 @@ def cmd_rl(args: argparse.Namespace) -> int:
         return _cmd_rl_evaluate(args)
     if args.rl_command == "compare":
         return _cmd_rl_compare(args)
+    if args.rl_command == "dashboard":
+        return _cmd_rl_dashboard(args)
     print(f"unknown rl command: {args.rl_command}", file=sys.stderr)
     return 2
 
@@ -868,6 +891,83 @@ def _cmd_rl_compare(args: argparse.Namespace) -> int:
     finally:
         store.close()
     print("both evaluation runs recorded in training_runs")
+    return 0
+
+
+def _cmd_rl_dashboard(args: argparse.Namespace) -> int:
+    """Sprint 18: learning-curve dashboard across policy generations."""
+    from .training import compare_generations, generate_learning_curve_plot
+
+    generations = [g.strip() for g in args.gens.split(",") if g.strip()]
+    print(
+        f"Evaluating {len(generations)} generations "
+        f"({', '.join(generations)}) on {args.worlds} worlds × "
+        f"{args.ticks} ticks..."
+    )
+    report = compare_generations(
+        generations=generations,
+        num_worlds=args.worlds,
+        first_seed=args.first_seed,
+        ticks=args.ticks,
+        size=args.size,
+        num_settlements=args.settlements,
+    )
+    curve = report["curve"]
+
+    metric_key = {
+        "survival": "mean_survival",
+        "reward": "reward_win_fraction",
+        "peak_population": "mean_peak_pop",
+    }[args.metric]
+
+    print("\nLearning curve:")
+    print(f"  {'gen':<8} | {'survival':>9} | {'peak pop':>8} | "
+          f"{'reward wins':>11} | trained eps")
+    for gen in generations:
+        c = curve[gen]
+        print(f"  {gen:<8} | {c['mean_survival']:>9} | "
+              f"{c['mean_peak_pop']:>8} | "
+              f"{c['reward_win_fraction']*100:>10.0f}% | "
+              f"{c['episodes_trained']}")
+
+    values = [curve[g][metric_key] for g in generations]
+    first, last = values[0], values[-1]
+    if first:
+        improvement = (last - first) / abs(first) * 100
+        change_str = f"{improvement:+.1f}%"
+    else:
+        change_str = "n/a (first-generation value is zero)"
+    print(f"\nPrimary metric ({args.metric}):")
+    for gen, v in zip(generations, values):
+        marker = " <-" if v == max(values) else ""
+        print(f"  {gen:<8} {v}{marker}")
+    print(
+        f"  gen1 -> {generations[-1]} change: {change_str}"
+    )
+
+    mono = report["monotonic"]
+    print("\nMonotonicity (non-decreasing OR non-increasing):")
+    for key in ("survival", "reward_wins", "peak_pop"):
+        print(f"  {key}: {mono[key]}  values={mono[key + '_values']}")
+
+    regressions = report["regressions"]
+    if regressions:
+        print(f"\nREGRESSIONS detected ({len(regressions)} seeds where "
+              f"{generations[-1]} < {generations[0]} on survival):")
+        for r in regressions:
+            print(f"  seed {r['seed']}")
+    else:
+        print(f"\nNo regressions: {generations[-1]} never loses to "
+              f"{generations[0]} on survival")
+
+    if args.plot:
+        out = generate_learning_curve_plot(curve, args.plot)
+        print(f"learning-curve plot written to {out}")
+
+    out_json = Path("data/world_sim/policies/dashboard_results.json")
+    with out_json.open("w", encoding="utf-8") as fh:
+        json.dump(report, fh, indent=2)
+    print(f"full results written to {out_json}")
     return 0
 
 

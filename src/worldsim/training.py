@@ -446,6 +446,134 @@ def paired_permutation_pvalue(a, b, n_perm: int = 10_000,
     return round((hits + 1) / (n_perm + 1), 4)
 
 
+def compare_generations(
+    generations: list[str],
+    num_worlds: int = 10,
+    first_seed: int = 50_000,
+    ticks: int = 3000,
+    size: int = 256,
+    num_settlements: int = 5,
+    disaster_mult: float = 1.0,
+    gather_mult: float = 1.0,
+    db_path: str | Path | None = None,
+) -> dict:
+    """Sprint 18: evaluate each generation vs baseline on identical worlds
+    and analyze the learning curve.
+
+    Returns per-generation aggregates, monotonicity checks across
+    generations (on survival / reward / peak population), and a per-seed
+    regression check of the newest generation against the first."""
+    per_gen = {}
+    from .db import DEFAULT_DB_PATH, WorldStore
+
+    for gen in generations:
+        store = WorldStore(db_path or DEFAULT_DB_PATH)
+        try:
+            resolved, record = resolve_policy_path(store, gen)
+        finally:
+            store.close()
+        results = evaluate_vs_baseline(
+            model_path=resolved,
+            num_worlds=num_worlds,
+            first_seed=first_seed,
+            ticks=ticks,
+            size=size,
+            num_settlements=num_settlements,
+            disaster_mult=disaster_mult,
+            gather_mult=gather_mult,
+        )
+        results["agent_type"] = f"policy_{gen}_vs_rulebased"
+        per_gen[gen] = results
+
+    # Learning-curve aggregates per generation.
+    curve = {
+        gen: {
+            "mean_survival": r["mean_policy_survival"],
+            "reward_win_fraction": r["reward_win_fraction"],
+            "mean_peak_pop": round(r["mean_policy_peak_pop"], 1),
+            "episodes_trained": _gen_training_episodes(gen),
+        }
+        for gen, r in per_gen.items()
+    }
+
+    # Monotonicity across generations (in generation order).
+    gens_in_order = list(generations)
+    monotonic = {}
+    for key, getter in (
+        ("survival", lambda g: curve[g]["mean_survival"]),
+        ("reward_wins", lambda g: curve[g]["reward_win_fraction"]),
+        ("peak_pop", lambda g: curve[g]["mean_peak_pop"]),
+    ):
+        values = [getter(g) for g in gens_in_order]
+        monotonic[key] = all(
+            values[i] <= values[i + 1] + 1e-9 for i in range(len(values) - 1)
+        ) or all(
+            values[i] >= values[i + 1] - 1e-9 for i in range(len(values) - 1)
+        )
+        monotonic[f"{key}_values"] = values
+
+    # Regression check: newest gen vs first gen, per seed.
+    first_results = per_gen[gens_in_order[0]]["results"]
+    last_results = per_gen[gens_in_order[-1]]["results"]
+    regressions = []
+    for a, b in zip(first_results, last_results):
+        if b["policy_survival_ticks"] < a["policy_survival_ticks"]:
+            regressions.append({
+                "seed": a["seed"],
+                f"{gens_in_order[0]}_survival": a["policy_survival_ticks"],
+                f"{gens_in_order[-1]}_survival": b["policy_survival_ticks"],
+            })
+
+    return {
+        "generations": gens_in_order,
+        "curve": curve,
+        "monotonic": monotonic,
+        "regressions": regressions,
+        "per_generation_results": per_gen,
+    }
+
+
+def _gen_training_episodes(gen: str):
+    """Training episodes for a generation from its registry summary."""
+    summary_path = POLICIES_DIR / f"policy_{gen}_summary.json"
+    if Path(summary_path).exists():
+        data = json.loads(Path(summary_path).read_text(encoding="utf-8"))
+        return data.get("episodes")
+    return None
+
+
+def generate_learning_curve_plot(curve: dict, out_png: str | Path) -> Path:
+    """Learning curve PNG: mean survival + reward wins per generation."""
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    gens = list(curve.keys())
+    x = range(len(gens))
+    fig, ax1 = plt.subplots(figsize=(8, 4.5))
+    ax1.plot(x, [curve[g]["mean_survival"] for g in gens], "o-",
+             label="mean survival (ticks)", color="tab:blue")
+    ax1.set_xticks(x)
+    ax1.set_xticklabels(gens)
+    ax1.set_ylabel("mean survival (ticks)")
+    ax2 = ax1.twinx()
+    ax2.plot(x, [curve[g]["reward_win_fraction"] * 100 for g in gens], "s--",
+             label="reward win fraction (%)", color="tab:orange")
+    ax2.set_ylabel("reward win fraction (%)")
+    ax1.set_title("Learning curve across generations")
+    lines1, labels1 = ax1.get_legend_handles_labels()
+    lines2, labels2 = ax2.get_legend_handles_labels()
+    ax1.legend(lines1 + lines2, labels1 + labels2, loc="lower right",
+               fontsize=8)
+    fig.tight_layout()
+    out = Path(out_png)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(out, dpi=120)
+    plt.close(fig)
+    return out
+
+
 def evaluate_vs_baseline(
     model_path: str | Path,
     num_worlds: int = 10,

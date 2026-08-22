@@ -5,6 +5,87 @@ Decisions worth remembering are marked **[DECISION]**.
 
 ---
 
+## Session 19 — 2026-08-20 — Sprint 18: Measure Whether Agents Improve
+
+**Scope:** Phase 3 / Sprint 18 — multi-generation training (gen1→gen2→gen3),
+learning-curve dashboard, monotonicity + per-seed regression analysis.
+
+### What was built
+
+- Training: gen2 (40k timesteps) and gen3 (80k) via `--parallel 4`
+  (163.9s / 347.7s wall; training returns 22.17 / 27.18)
+- `training.py` — `compare_generations()`: evaluates each registered
+  generation vs baseline on identical worlds; aggregates learning-curve
+  curve data (survival / reward-win-fraction / peak pop / trained episodes);
+  monotonicity checks; **per-seed regression detection** of newest vs first
+  generation; optional `db_path` for isolated registries
+- `generate_learning_curve_plot()`: dual-axis PNG (survival line +
+  reward-win-fraction dashed)
+- CLI — `rl dashboard --gens gen1,gen2,gen3 --metric {survival,reward,
+  peak_population} --plot ...`: learning-curve table, primary-metric
+  progression with change %, monotonicity report, regression listing
+- Tests: 4 new (monotonicity/regression/improvement math units + slow
+  end-to-end two-generation dashboard on tiny worlds)
+- Fast suite: 249 passing
+
+### Decisions
+
+- **[DECISION] Generations trained with growing budgets** (20k/40k/80k)
+  rather than spec's episode counts — maps to wall-clock reality.
+- **[DECISION] Dashboard supports three metrics** because survival saturates;
+  reward-win-fraction and peak population carry actual signal.
+- **[DECISION] Monotonicity reported as non-decreasing OR non-increasing**
+  with raw values printed — the check flags direction consistency; the
+  values show WHICH direction (learning vs decay).
+- **[DECISION] Regression = newest gen strictly below first gen on survival
+  for a given seed**, reported per-seed.
+
+### Findings (the honest headline)
+
+```
+Dashboard run (4 worlds × 1500 ticks, metric=reward):
+  gen1: survival 1500.0, peak pop 71.0, reward wins 0%
+  gen2: survival 1500.0, peak pop 71.0, reward wins 0%   (trained 40k)
+  gen3: survival 1009.5, peak pop 49.5, reward wins 0%   (trained 80k)
+
+REGRESSIONS detected on 3 of 4 seeds (gen3 < gen1 survival)
+```
+
+**gen3 REGRESSED despite the highest training return (27.18)** — more
+training made the policy worse in the world. Likely contributors:
+1. Training-return drift vs world outcomes (possible reward fitting on
+   granary/building components rather than thriving).
+2. Each generation trained under different configs (sequential 20k vs
+   parallel 40k/80k) — not controlled comparison.
+3. No entropy floor captured (`mean_entropy: None`) — possible policy
+   collapse went unobserved.
+
+This is Sprint 18 working as designed: the tooling DETECTED non-improvement.
+The acceptance criteria (monotonic improvement, no regressions, >20% gain)
+are NOT met at this scale — honestly recorded. Follow-ups: fix entropy
+capture, control training configs across generations, longer runs, revisit
+reward shaping via Sprint 13 breakdowns.
+
+### Known issues / deferred
+
+- Full-scale dashboard (10 worlds × 3000 ticks × 3 gens ≈ 180k sim ticks)
+  exceeds 2 hours; reduced verification used. Parallel evaluation across
+  worlds is the natural speedup (Sprint 15 machinery applies to eval too).
+- Wilcoxon emits RuntimeWarning on zero-variance metrics (nan p-values
+  print as 'nan' in reports).
+- Reward-wins 0% everywhere: random-ish policies rarely out-reward the
+  rule-based baseline within these tick windows.
+
+### Acceptance criteria status
+
+- ⚠️ Monotonic improvement gen3 > gen2 > gen1: NOT observed (regression at
+  gen3) — detection works, improvement doesn't yet
+- ✅ Regression detection: gen3 loses on 3 seeds — flagged correctly
+- ✅ Queryable dashboard: `rl dashboard --gens ... --metric ...` (+ plot)
+- ⚠️ >20% improvement gen1→gen3: NOT met (negative on survival)
+
+---
+
 ## Session 18 — 2026-08-20 — Sprint 17: Rigorous Comparison & Statistical Significance
 
 **What was built**
