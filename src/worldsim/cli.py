@@ -200,13 +200,28 @@ def build_parser() -> argparse.ArgumentParser:
     eval_p = rl_sub.add_parser(
         "evaluate", help="Paired evaluation: trained policy vs rule-based"
     )
-    eval_p.add_argument("--model", required=True,
+    eval_p.add_argument("--model", default=None,
                        help="Path to SB3 checkpoint (.zip)")
+    eval_p.add_argument("--policy-id", default=None,
+                       help="Resolve checkpoint by registered generation "
+                            "(e.g., gen1); overrides --model")
     eval_p.add_argument("--worlds", type=int, default=10)
     eval_p.add_argument("--first-seed", type=int, default=50_000)
     eval_p.add_argument("--ticks", type=int, default=3000)
     eval_p.add_argument("--size", type=int, default=256)
     eval_p.add_argument("--settlements", type=int, default=5)
+
+    cmp_p = rl_sub.add_parser(
+        "compare",
+        help="Evaluate two policy generations vs baseline and report deltas",
+    )
+    cmp_p.add_argument("--gen-a", required=True, help="Generation label A")
+    cmp_p.add_argument("--gen-b", required=True, help="Generation label B")
+    cmp_p.add_argument("--worlds", type=int, default=10)
+    cmp_p.add_argument("--first-seed", type=int, default=50_000)
+    cmp_p.add_argument("--ticks", type=int, default=3000)
+    cmp_p.add_argument("--size", type=int, default=256)
+    cmp_p.add_argument("--settlements", type=int, default=5)
     return parser
 
 
@@ -639,13 +654,15 @@ def cmd_rl(args: argparse.Namespace) -> int:
         return _cmd_rl_run(args)
     if args.rl_command == "evaluate":
         return _cmd_rl_evaluate(args)
+    if args.rl_command == "compare":
+        return _cmd_rl_compare(args)
     print(f"unknown rl command: {args.rl_command}", file=sys.stderr)
     return 2
 
 
 def _cmd_rl_train(args: argparse.Namespace) -> int:
     from .db import WorldStore
-    from .training import benchmark_parallel, train
+    from .training import benchmark_parallel, register_checkpoint, train
 
     if args.compare:
         results = benchmark_parallel(timesteps=args.timesteps, seed=args.seed,
@@ -668,34 +685,63 @@ def _cmd_rl_train(args: argparse.Namespace) -> int:
     )
     store = WorldStore(DEFAULT_DB_PATH)
     try:
-        store.insert_policy_checkpoint({
-            "generation": args.generation,
-            "path": summary["checkpoint_path"],
-            "total_timesteps": summary["total_timesteps"],
-            "episodes": summary.get("episodes"),
-            "mean_episode_return": summary.get("mean_return"),
-            "wall_time_seconds": summary.get("wall_time_seconds"),
-        })
+        record = register_checkpoint(
+            store, args.generation,
+            save_dir / f"policy_{args.generation}", summary,
+        )
     finally:
         store.close()
     print(json.dumps(summary, indent=2))
-    print(f"checkpoint recorded in policy_checkpoints table")
+    print(
+        f"checkpoint registered: generation={args.generation} "
+        f"id={record['id']} sha256={record['checksum'][:16]}..."
+    )
     return 0
 
 
 def _cmd_rl_evaluate(args: argparse.Namespace) -> int:
-    from .training import evaluate_vs_baseline
+    from .db import WorldStore
+    from .training import evaluate_vs_baseline, resolve_policy_path
 
-    results = evaluate_vs_baseline(
-        model_path=args.model,
-        num_worlds=args.worlds,
-        first_seed=args.first_seed,
-        ticks=args.ticks,
-        size=args.size,
-        num_settlements=args.settlements,
-    )
+    if not args.policy_id and not args.model:
+        print("provide --policy-id or --model", file=sys.stderr)
+        return 2
+
+    store = WorldStore(DEFAULT_DB_PATH)
+    try:
+        resolved, record = resolve_policy_path(
+            store, args.policy_id or "gen1", explicit_path=args.model
+        )
+        results = evaluate_vs_baseline(
+            model_path=resolved,
+            num_worlds=args.worlds,
+            first_seed=args.first_seed,
+            ticks=args.ticks,
+            size=args.size,
+            num_settlements=args.settlements,
+        )
+        generation = (
+            record["generation"] if record else (args.policy_id or "explicit")
+        )
+        store.insert_training_run({
+            "policy_generation_a": generation,
+            "eval_seed_base": args.first_seed,
+            "worlds": results["worlds"],
+            "wins_a": results["policy_wins"],
+            "ties": results["ties"],
+            "win_fraction": results["win_fraction_strict"],
+            "mean_survival_a": results["mean_policy_survival"],
+            "mean_survival_b": results["mean_baseline_survival"],
+            "results_json": results,
+        })
+    finally:
+        store.close()
+    checksum_note = ""
+    if record and record.get("checksum"):
+        checksum_note = f" (checksum verified {record['checksum'][:16]}...)"
     print(
-        f"\nEvaluation over {results['worlds']} worlds:\n"
+        f"\nEvaluation over {results['worlds']} worlds "
+        f"[{generation}]{checksum_note}:\n"
         f"  policy wins (strict survival): {results['policy_wins']} "
         f"({results['win_fraction_strict']*100:.0f}%)\n"
         f"  ties: {results['ties']}\n"
@@ -704,10 +750,79 @@ def _cmd_rl_evaluate(args: argparse.Namespace) -> int:
         f"  mean peak pop — baseline {results['mean_baseline_peak_pop']:.0f} "
         f"vs policy {results['mean_policy_peak_pop']:.0f}"
     )
-    out = Path(args.model).parent / "eval_results.json"
+    out_dir = Path(resolved).parent
+    out = out_dir / "eval_results.json"
     with out.open("w", encoding="utf-8") as fh:
         json.dump(results, fh, indent=2)
     print(f"results written to {out}")
+    return 0
+
+
+def _evaluate_generation(gen: str, args: argparse.Namespace) -> tuple[dict, dict]:
+    from .db import WorldStore
+    from .training import evaluate_vs_baseline, resolve_policy_path
+
+    store = WorldStore(DEFAULT_DB_PATH)
+    try:
+        resolved, record = resolve_policy_path(store, gen)
+    finally:
+        store.close()
+    results = evaluate_vs_baseline(
+        model_path=resolved,
+        num_worlds=args.worlds,
+        first_seed=args.first_seed,
+        ticks=args.ticks,
+        size=args.size,
+        num_settlements=args.settlements,
+    )
+    return results, record
+
+
+def _cmd_rl_compare(args: argparse.Namespace) -> int:
+    """Evaluate two generations vs baseline; report deltas and log both runs
+    into training_runs (gen N vs gen N-1 comparison, spec Sprint 16)."""
+    res_a, rec_a = _evaluate_generation(args.gen_a, args)
+    res_b, rec_b = _evaluate_generation(args.gen_b, args)
+
+    delta_win = res_a["win_fraction_strict"] - res_b["win_fraction_strict"]
+    delta_surv = res_a["mean_policy_survival"] - res_b["mean_policy_survival"]
+    delta_peak = (
+        res_a["mean_policy_peak_pop"] - res_b["mean_policy_peak_pop"]
+    )
+    print(f"\nComparison {args.gen_a} vs {args.gen_b}:")
+    print(
+        f"  win fraction vs baseline : "
+        f"{res_a['win_fraction_strict']*100:.0f}% vs "
+        f"{res_b['win_fraction_strict']*100:.0f}% (delta {delta_win*100:+.0f}pp)"
+    )
+    print(
+        f"  mean policy survival     : "
+        f"{res_a['mean_policy_survival']} vs "
+        f"{res_b['mean_policy_survival']} (delta {delta_surv:+.1f})"
+    )
+    print(
+        f"  mean peak population     : "
+        f"{res_a['mean_policy_peak_pop']:.1f} vs "
+        f"{res_b['mean_policy_peak_pop']:.1f} (delta {delta_peak:+.1f})"
+    )
+
+    store = WorldStore(DEFAULT_DB_PATH)
+    try:
+        for gen, res in ((args.gen_a, res_a), (args.gen_b, res_b)):
+            store.insert_training_run({
+                "policy_generation_a": gen,
+                "eval_seed_base": args.first_seed,
+                "worlds": res["worlds"],
+                "wins_a": res["policy_wins"],
+                "ties": res["ties"],
+                "win_fraction": res["win_fraction_strict"],
+                "mean_survival_a": res["mean_policy_survival"],
+                "mean_survival_b": res["mean_baseline_survival"],
+                "results_json": res,
+            })
+    finally:
+        store.close()
+    print("both evaluation runs recorded in training_runs")
     return 0
 
 

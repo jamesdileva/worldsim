@@ -5,6 +5,78 @@ Decisions worth remembering are marked **[DECISION]**.
 
 ---
 
+## Session 17 — 2026-08-20 — Sprint 16: Policy Checkpoints & Model Versioning
+
+**Scope:** Phase 3 / Sprint 16 — checksums for corruption detection,
+registry-based checkpoint resolution (`--policy-id`), `training_runs`
+evaluation logging, generation comparison, rollback determinism.
+
+### What was built
+
+- `db.py` —
+  - `policy_checkpoints` gains `checksum` + `size_bytes` columns via guarded
+    ALTER TABLE migrations (pre-Sprint-16 databases migrate on open)
+  - new `training_runs` table (§24.1): per-evaluation records with win
+    fractions, survival means, full results JSON
+  - `get_latest_policy_checkpoint(generation)` (latest by id),
+    `insert_training_run()`
+- `training.py` — `file_sha256()` (streamed), `verify_policy_checksum()`,
+  `register_checkpoint()` (hashes + sizes at registration),
+  `resolve_policy_path()` (registry id or explicit path; verifies checksum)
+- CLI —
+  - `rl train` now registers with checksum automatically
+  - `rl evaluate --policy-id gen1` resolves via registry (checksum verified;
+    legacy records without checksums skip verification with a note)
+  - `rl compare --gen-a X --gen-b Y`: evaluates both vs baseline, prints
+    deltas (win fraction / survival / peak pop), logs both runs into
+    `training_runs`
+- Tests: 237 fast-suite passing (10 new)
+
+### Decisions
+
+- **[DECISION] sha256 streamed hashing at REGISTRATION time** — corruption
+  detection is then a cheap re-hash on load. SB3 checkpoints are zips; any
+  byte flip changes the hash.
+- **[DECISION] Registry resolution verifies before loading**: tampered or
+  truncated files raise "Checkpoint corruption detected" instead of crashing
+  deep inside torch.load.
+- **[DECISION] Legacy checksumless records skip verification** rather than
+  failing — the Sprint-14 gen1 record predates checksums; re-training will
+  upgrade it.
+- **[DECISION] Missing file always fails verification**, even for legacy
+  records (existence is not version-dependent).
+- **[DECISION] rl compare evaluates each generation vs the BASELINE
+  separately** (side-by-side deltas) rather than head-to-head policy-vs-
+  policy — head-to-head requires two external controllers in one env, which
+  arrives with self-play in Phase 4.
+
+### Gotchas / bugs found & fixed
+
+- verify order bug: `None` checksum returned True even for MISSING files
+  (short-circuit ordering) — existence must always gate first.
+- Guarded-migration pattern added because CREATE IF NOT EXISTS doesn't add
+  columns to existing tables.
+
+### Acceptance criteria status
+
+- ✅ Policies saved with full metadata incl. checksum + size in SQLite
+- ✅ Any checkpoint can be loaded and evaluated on demand (registry id →
+  verified path; demonstrated live against real world.db gen1 record)
+- ✅ Evaluation results logged per-world in `training_runs`
+- ✅ Rollback to gen1 produces identical results on identical seeds
+  (unit-tested double-eval equality)
+
+### Next up (Sprint 17)
+
+Compare trained agent vs baseline rigorously: fixed benchmark suite of 20
+worlds, both agents run on all worlds, statistical significance testing
+(p < 0.05), report generation. Note: Sprint 14's finding stands — survival
+metrics saturate vs the rule-based baseline; Sprint 17 should also define
+non-saturated secondary metrics (peak population delta, resource efficiency)
+or use harder worlds so the comparison has signal.
+
+---
+
 ## Session 16 — 2026-08-20 — Sprint 15: Parallel Simulation Training
 
 **Scope:** Phase 3 / Sprint 15 — VecEnv with parallel simulation workers,

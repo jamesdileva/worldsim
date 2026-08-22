@@ -121,7 +121,7 @@ CREATE TABLE IF NOT EXISTS world_events (
     description TEXT NOT NULL
 );
 
--- Trained policy checkpoints (Sprint 14).
+-- Trained policy checkpoints (Sprint 14; checksums Sprint 16).
 CREATE TABLE IF NOT EXISTS policy_checkpoints (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     generation TEXT NOT NULL,
@@ -133,7 +133,29 @@ CREATE TABLE IF NOT EXISTS policy_checkpoints (
     wall_time_seconds REAL,
     created_at TEXT NOT NULL
 );
+
+-- Policy evaluation results per run (Sprint 16).
+CREATE TABLE IF NOT EXISTS training_runs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    policy_generation_a TEXT NOT NULL,
+    policy_generation_b TEXT,
+    eval_seed_base INTEGER NOT NULL,
+    worlds INTEGER NOT NULL,
+    wins_a INTEGER NOT NULL,
+    ties INTEGER NOT NULL,
+    win_fraction REAL NOT NULL,
+    mean_survival_a REAL NOT NULL,
+    mean_survival_b REAL NOT NULL,
+    results_json TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
 """
+
+# Lightweight migration for databases created before a column existed.
+_MIGRATIONS = [
+    "ALTER TABLE policy_checkpoints ADD COLUMN checksum TEXT",
+    "ALTER TABLE policy_checkpoints ADD COLUMN size_bytes INTEGER",
+]
 
 
 def _encode_array(arr: np.ndarray) -> dict:
@@ -420,6 +442,11 @@ class WorldStore:
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self._conn = sqlite3.connect(self.db_path)
         self._conn.executescript(_SCHEMA)
+        for migration in _MIGRATIONS:
+            try:
+                self._conn.execute(migration)
+            except sqlite3.OperationalError:
+                pass  # column already exists
         self._conn.commit()
 
     def close(self) -> None:
@@ -747,14 +774,15 @@ class WorldStore:
         return int(cur.lastrowid)
 
     def insert_policy_checkpoint(self, metrics: dict) -> int:
-        """Store a trained policy checkpoint record (Sprint 14)."""
+        """Store a trained policy checkpoint record (Sprint 14/16)."""
         created_at = datetime.now(timezone.utc).isoformat()
         with self._conn:
             cur = self._conn.execute(
                 "INSERT INTO policy_checkpoints "
                 "(generation, path, algorithm, total_timesteps, episodes, "
-                "mean_episode_return, wall_time_seconds, created_at) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                "mean_episode_return, wall_time_seconds, checksum, size_bytes,"
+                " created_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     metrics.get("generation", "gen1"),
                     metrics["path"],
@@ -763,6 +791,53 @@ class WorldStore:
                     metrics.get("episodes"),
                     metrics.get("mean_episode_return"),
                     metrics.get("wall_time_seconds"),
+                    metrics.get("checksum"),
+                    metrics.get("size_bytes"),
+                    created_at,
+                ),
+            )
+        return int(cur.lastrowid)
+
+    def get_latest_policy_checkpoint(
+        self, generation: str
+    ) -> dict | None:
+        row = self._conn.execute(
+            "SELECT id, generation, path, algorithm, total_timesteps, "
+            "episodes, mean_episode_return, wall_time_seconds, checksum, "
+            "size_bytes, created_at FROM policy_checkpoints "
+            "WHERE generation = ? ORDER BY id DESC LIMIT 1",
+            (generation,),
+        ).fetchone()
+        if row is None:
+            return None
+        keys = [
+            "id", "generation", "path", "algorithm", "total_timesteps",
+            "episodes", "mean_episode_return", "wall_time_seconds",
+            "checksum", "size_bytes", "created_at",
+        ]
+        return dict(zip(keys, row))
+
+    def insert_training_run(self, metrics: dict) -> int:
+        """Store a paired evaluation run (Sprint 16)."""
+        created_at = datetime.now(timezone.utc).isoformat()
+        with self._conn:
+            cur = self._conn.execute(
+                "INSERT INTO training_runs "
+                "(policy_generation_a, policy_generation_b, eval_seed_base, "
+                "worlds, wins_a, ties, win_fraction, mean_survival_a, "
+                "mean_survival_b, results_json, created_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    metrics["policy_generation_a"],
+                    metrics.get("policy_generation_b"),
+                    metrics["eval_seed_base"],
+                    metrics["worlds"],
+                    metrics["wins_a"],
+                    metrics["ties"],
+                    metrics["win_fraction"],
+                    metrics["mean_survival_a"],
+                    metrics["mean_survival_b"],
+                    json.dumps(metrics.get("results_json", {})),
                     created_at,
                 ),
             )

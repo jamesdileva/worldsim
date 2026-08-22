@@ -8,6 +8,7 @@ settlement under the rule-based baseline, comparing survival time.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import threading
 import time
@@ -16,6 +17,63 @@ from pathlib import Path
 
 POLICIES_DIR = Path("data/world_sim/policies")
 DEFAULT_LOG_PATH = POLICIES_DIR / "train_log.jsonl"
+
+
+def file_sha256(path: str | Path) -> str:
+    """SHA-256 of a file, streamed (checkpoint corruption detection)."""
+    sha = hashlib.sha256()
+    with open(path, "rb") as fh:
+        for chunk in iter(lambda: fh.read(1 << 20), b""):
+            sha.update(chunk)
+    return sha.hexdigest()
+
+
+def verify_policy_checksum(path: str | Path, expected_sha256: str | None) -> bool:
+    if not Path(path).exists():
+        return False
+    # Legacy records predate checksums (None) — nothing to verify.
+    if expected_sha256 is None:
+        return True
+    return file_sha256(path) == expected_sha256
+
+
+def register_checkpoint(db_store, generation: str, path: str | Path,
+                        summary: dict) -> dict:
+    """Hash the checkpoint file and record it in policy_checkpoints.
+    Returns the registry record."""
+    zip_path = Path(f"{path}.zip")
+    record = {
+        "generation": generation,
+        "path": str(zip_path),
+        "total_timesteps": summary["total_timesteps"],
+        "episodes": summary.get("episodes"),
+        "mean_episode_return": summary.get("mean_return"),
+        "wall_time_seconds": summary.get("wall_time_seconds"),
+        "checksum": file_sha256(zip_path),
+        "size_bytes": zip_path.stat().st_size,
+    }
+    record["id"] = db_store.insert_policy_checkpoint(record)
+    return record
+
+
+def resolve_policy_path(db_store, policy_id: str, explicit_path=None):
+    """Resolve a checkpoint path by registry id (generation) or explicit
+    path; verifies the recorded checksum when resolving via registry.
+
+    Returns (resolved_path, registry_record | None)."""
+    if explicit_path is not None:
+        return str(explicit_path), None
+    record = db_store.get_latest_policy_checkpoint(policy_id)
+    if record is None:
+        raise ValueError(
+            f"No registered checkpoint for generation '{policy_id}'"
+        )
+    if not verify_policy_checksum(record["path"], record["checksum"]):
+        raise ValueError(
+            f"Checkpoint corruption detected for '{policy_id}': "
+            f"{record['path']} does not match recorded checksum"
+        )
+    return record["path"], record
 
 
 class CpuUsageSampler:
