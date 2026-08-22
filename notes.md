@@ -5,6 +5,61 @@ Decisions worth remembering are marked **[DECISION]**.
 
 ---
 
+## Session 20 — 2026-08-20 — Learning Remediation (entropy fix, reward rebalance, controlled cohort)
+
+**Scope:** Sprint 18 follow-ups as one coherent piece: entropy capture fix,
+configurable reward weights, controlled retraining cohort, dashboard re-run.
+
+### What was built
+
+- **Entropy capture fixed**: SB3 logs `train/entropy_loss` (NEGATIVE mean
+  entropy), never `train/entropy` — confirmed empirically by dumping logger
+  keys after learn(). Callback now stores positive entropy plus
+  explained_variance and approx_kl; summary gains `final_entropy` (collapse
+  detection) and `mean_explained_variance`.
+- **Configurable reward weights**: `RewardWeights` dataclass +
+  `compute_reward_components(weights=...)`; env accepts `reward_weights`
+  dict. Rebalanced defaults from Sprint 13 breakdown data: population gain
+  doubled (0.02→0.05), building delta halved (0.05→0.02) — thriving matters
+  more than spamming construction.
+- **Controlled retraining cohort** gen1r/gen2r/gen3r: IDENTICAL configs
+  (--parallel 4, size 64, settlements 3, max_ticks 1000), differing only in
+  timesteps (20k/40k/80k). Originals preserved.
+- Tests: 2 new (weight overrides on components; weights flow through env).
+
+### Controlled cohort results
+
+```
+Training health (now fully observable):
+  return:            6.51 -> 10.24 -> 13.89   (monotonic UP)
+  explained var:     0.54 -> 0.71 -> 0.81     (value fn converging)
+  entropy final:     3.51 -> 2.44 -> 1.74     (converging, not collapsed)
+Dashboard (4 worlds x 1500 ticks):
+  NO REGRESSIONS — gen3r never loses to gen1r (Sprint 18's gen3 collapse
+  was caused by uncontrolled configs, now proven)
+  survival/peak-pop flat at equilibrium (1500/71) — saturation unchanged
+```
+
+### Decisions
+
+- **[DECISION] Entropy = -entropy_loss** (SB3 convention); also capture
+  explained_variance and approx_kl as policy-health indicators.
+- **[DECISION] Reward rebalance via dataclass defaults** rather than one-off
+  edits — future shaping experiments are config changes.
+- **[DECISION] Keep original gens alongside r-cohort** — the uncontrolled
+  regression is preserved as evidence for the controlled-fix comparison.
+
+### Honest status
+
+Training-side learning is now demonstrably healthy and observable
+(monotonic returns, converging value function, controlled configs = no
+regressions). Evaluation-side metrics remain saturated (survival/peak-pop
+equilibrium), so "improvement" is currently only visible in training-time
+returns. Next lever when we want eval-visible deltas: harder worlds at
+longer horizons, or metrics measuring efficiency rather than equilibrium.
+
+---
+
 ## Session 19 — 2026-08-20 — Sprint 18: Measure Whether Agents Improve
 
 **Scope:** Phase 3 / Sprint 18 — multi-generation training (gen1→gen2→gen3),

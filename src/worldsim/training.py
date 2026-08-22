@@ -173,13 +173,15 @@ def benchmark_parallel(
 
 class EpisodeMetricsCallback:
     """SB3-native metrics capture: per-episode returns/lengths (via Monitor's
-    info["episode"]) and policy/value losses + entropy (via the logger)."""
+    info["episode"]) and losses/health metrics (via the logger)."""
 
     def __init__(self, log_path: str | Path = DEFAULT_LOG_PATH) -> None:
         self.log_path = Path(log_path)
         self.episodes: list[dict] = []
         self.losses: list[float] = []
         self.entropies: list[float] = []
+        self.explained_variances: list[float] = []
+        self.approx_kls: list[float] = []
 
     def record_episode(self, timesteps: int, episode_return: float,
                        length: int) -> None:
@@ -194,33 +196,51 @@ class EpisodeMetricsCallback:
             fh.write(json.dumps(self.episodes[-1]) + "\n")
 
     def capture_losses(self, name_to_value: dict) -> None:
-        for key in ("train/policy_loss", "train/value_loss"):
-            if key in name_to_value:
-                try:
-                    self.losses.append(float(name_to_value[key]))
-                except (TypeError, ValueError):
-                    pass
-        if "train/entropy" in name_to_value:
+        if "train/policy_loss" in name_to_value:
             try:
-                self.entropies.append(float(name_to_value["train/entropy"]))
+                self.losses.append(float(name_to_value["train/policy_loss"]))
+            except (TypeError, ValueError):
+                pass
+        # SB3 logs NEGATIVE mean entropy as entropy_loss; store the true
+        # (positive) entropy so collapse is visible as a drop toward zero.
+        if "train/entropy_loss" in name_to_value:
+            try:
+                self.entropies.append(
+                    -float(name_to_value["train/entropy_loss"])
+                )
+            except (TypeError, ValueError):
+                pass
+        if "train/explained_variance" in name_to_value:
+            try:
+                self.explained_variances.append(
+                    float(name_to_value["train/explained_variance"])
+                )
+            except (TypeError, ValueError):
+                pass
+        if "train/approx_kl" in name_to_value:
+            try:
+                self.approx_kls.append(float(name_to_value["train/approx_kl"]))
             except (TypeError, ValueError):
                 pass
 
     def summary(self) -> dict:
         returns = [e["return"] for e in self.episodes]
+
+        def mean(xs):
+            return round(sum(xs) / len(xs), 5) if xs else None
+
         return {
             "episodes": len(self.episodes),
             "mean_return": (
                 round(sum(returns) / len(returns), 4) if returns else 0.0
             ),
-            "mean_policy_loss": (
-                round(sum(self.losses) / len(self.losses), 5)
-                if self.losses else None
+            "mean_policy_loss": mean(self.losses),
+            "mean_entropy": mean(self.entropies),
+            "final_entropy": (
+                round(self.entropies[-1], 5) if self.entropies else None
             ),
-            "mean_entropy": (
-                round(sum(self.entropies) / len(self.entropies), 5)
-                if self.entropies else None
-            ),
+            "mean_explained_variance": mean(self.explained_variances),
+            "mean_approx_kl": mean(self.approx_kls),
         }
 
 

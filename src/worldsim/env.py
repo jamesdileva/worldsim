@@ -21,6 +21,7 @@ from .actions import NUM_ACTIONS
 from .agents import OBSERVATION_DIM, observe_vector
 from .rewards import (
     RewardHackingDetector,
+    RewardWeights,
     RollingNormalizer,
     compute_reward_components,
     total_of,
@@ -63,6 +64,7 @@ class WorldSimEnv(gym.Env):
         replay_capacity: int = 10_000,
         disaster_chance_mult: float = 1.0,
         gather_mult: float = 1.0,
+        reward_weights: dict | None = None,
     ) -> None:
         super().__init__()
         self.seed_value = seed
@@ -71,6 +73,9 @@ class WorldSimEnv(gym.Env):
         self.max_ticks = max_ticks
         self.disaster_chance_mult = disaster_chance_mult
         self.gather_mult = gather_mult
+        # Sprint 18b: configurable §6.4 weights (shaping rebalance without
+        # code edits).
+        self.reward_weights = RewardWeights(**(reward_weights or {}))
 
         self.action_space = gym.spaces.Discrete(NUM_ACTIONS)
         self.observation_space = gym.spaces.Box(
@@ -156,6 +161,7 @@ class WorldSimEnv(gym.Env):
             starvation_progress=self.controlled.starvation_progress,
             repeated_action_count=self._repeat_count,
             action_executed=executed,
+            weights=self.reward_weights,
         )
         reward = float(max(-1.0, min(1.0, total_of(components))))
         self.normalizer.record(reward)

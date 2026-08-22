@@ -24,6 +24,24 @@ PENALTY_REDUNDANT_ACTION = 0.01  # escalates with repetition count
 BONUS_EFFECTIVE_ACTION = 0.005
 
 
+@dataclass
+class RewardWeights:
+    """Configurable §6.4 weights (Sprint 18b).
+
+    Defaults reflect Sprint 13 breakdown analysis: buildings were spammy
+    (+0.05 each) while thriving (population gain) was underweighted, so the
+    rebalance doubles population gain and cuts building delta."""
+
+    population_gain: float = 0.05
+    population_loss: float = 0.2
+    survival_per_tick: float = 0.001
+    building_delta: float = 0.02
+    route_delta: float = 0.15
+    starving_tick: float = 0.02
+    redundant_action: float = 0.01
+    effective_action: float = 0.005
+
+
 def compute_reward_components(
     prev_population: int,
     population: int,
@@ -33,33 +51,35 @@ def compute_reward_components(
     starvation_progress: int,
     repeated_action_count: int,
     action_executed: bool,
+    weights: RewardWeights | None = None,
 ) -> dict[str, float]:
     """Named reward components for one tick (§6.4-shaped). Returns a dict
     whose values sum to the total step reward (pre-clamp); callers clamp."""
+    w = weights or RewardWeights()
     c: dict[str, float] = {
-        "survival": REWARD_SURVIVAL_PER_TICK,
+        "survival": w.survival_per_tick,
         "population": 0.0,
-        "buildings": REWARD_BUILDING_DELTA * max(0, building_delta),
-        "routes": REWARD_ROUTE_DELTA * max(0, route_delta),
+        "buildings": w.building_delta * max(0, building_delta),
+        "routes": w.route_delta * max(0, route_delta),
         "starvation": 0.0,
         "redundant_action": 0.0,
         "effective_action": 0.0,
     }
     pop_delta = population - prev_population
     if pop_delta > 0:
-        c["population"] += REWARD_POPULATION_GAIN * pop_delta
+        c["population"] += w.population_gain * pop_delta
     elif pop_delta < 0:
-        c["population"] -= REWARD_POPULATION_LOSS * abs(pop_delta)
+        c["population"] -= w.population_loss * abs(pop_delta)
     if food_stock <= 0 and starvation_progress > 10:
-        c["starvation"] -= PENALTY_STARVING_TICK
+        c["starvation"] -= w.starving_tick
     # Redundant-action shaping: repeating the identical action gets
     # progressively costlier from the 5th consecutive tick.
     if repeated_action_count >= 5:
-        c["redundant_action"] -= PENALTY_REDUNDANT_ACTION * min(
+        c["redundant_action"] -= w.redundant_action * min(
             repeated_action_count - 4, 10
         )
     if action_executed:
-        c["effective_action"] += BONUS_EFFECTIVE_ACTION
+        c["effective_action"] += w.effective_action
     return c
 
 
