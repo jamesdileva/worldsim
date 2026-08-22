@@ -333,47 +333,117 @@ class PairedResult:
     policy_survival_ticks: int
     baseline_peak_population: int
     policy_peak_population: int
+    baseline_territory: int = 0
+    policy_territory: int = 0
+    baseline_buildings: int = 0
+    policy_buildings: int = 0
+    baseline_routes_established: int = 0
+    policy_routes_established: int = 0
+    baseline_reward: float = 0.0
+    policy_reward: float = 0.0
 
 
-def _run_baseline(seed: int, size: int, num_settlements: int, ticks: int):
-    """Rule-based-only run; returns settlement 0's survival/peak stats."""
+def _run_baseline(seed: int, size: int, num_settlements: int, ticks: int,
+                  disaster_mult: float = 1.0, gather_mult: float = 1.0):
+    """Rule-based-only run; returns settlement 0's survival/peak/end-state
+    stats plus its cumulative §6.4 reward (shared measurement with the RL
+    side — Sprint 17)."""
+    from .rewards import compute_reward_components, total_of
     from .simulation import Simulation
     from .world import World
 
-    sim = Simulation(World(seed=seed, size=size))
+    sim = Simulation(World(seed=seed, size=size),
+                     disaster_chance_mult=disaster_mult,
+                     gather_mult=gather_mult)
     settlements = sim.spawn_settlements(count=num_settlements)
     target = settlements[0]
     peak = target.population
     survived_ticks = 0
+    reward_total = 0.0
+    prev_pop = target.population
+    prev_buildings = sum(sim.buildings_of(target).values())
+    routes_before = target.routes_established
     for t in range(1, ticks + 1):
         sim.step()
-        if target.is_alive:
-            survived_ticks = t
-            peak = max(peak, target.population)
-    return survived_ticks, peak
+        if not target.is_alive:
+            continue
+        survived_ticks = t
+        peak = max(peak, target.population)
+        buildings_now = sum(sim.buildings_of(target).values())
+        comps = compute_reward_components(
+            prev_population=prev_pop,
+            population=target.population,
+            building_delta=buildings_now - prev_buildings,
+            route_delta=target.routes_established - routes_before,
+            food_stock=target.food_stock,
+            starvation_progress=target.starvation_progress,
+            repeated_action_count=0,
+            action_executed=True,
+        )
+        reward_total += total_of(comps)
+        prev_pop = target.population
+        prev_buildings = buildings_now
+        routes_before = target.routes_established
+    end = {
+        "territory": len(sim.territory_of(target)),
+        "buildings": sum(sim.buildings_of(target).values()),
+        "routes": target.routes_established,
+        "food": round(target.food_stock, 1),
+    }
+    return survived_ticks, peak, end, round(reward_total, 3)
 
 
 def _run_policy(model, seed: int, size: int, num_settlements: int,
-                ticks: int):
+                ticks: int, disaster_mult: float = 1.0,
+                gather_mult: float = 1.0):
     """World where settlement 0 is driven by the trained policy."""
     from .env import WorldSimEnv
 
     env = WorldSimEnv(seed=seed, size=size, num_settlements=num_settlements,
-                      max_ticks=ticks)
+                      max_ticks=ticks, disaster_chance_mult=disaster_mult,
+                      gather_mult=gather_mult)
     obs, _ = env.reset(seed=seed)
     assert env.controlled is not None
     peak = env.controlled.population
     survived_ticks = 0
+    reward_total = 0.0
     done = False
     while not done:
         action, _ = model.predict(obs, deterministic=True)
-        obs, _, terminated, truncated, info = env.step(int(action))
+        obs, reward, terminated, truncated, info = env.step(int(action))
         done = terminated or truncated
         s = env.controlled
         if s.is_alive:
             survived_ticks = env.sim.tick
             peak = max(peak, s.population)
-    return survived_ticks, peak
+        reward_total += reward
+    counts = env.sim.buildings_of(env.controlled)
+    end = {
+        "territory": len(env.sim.territory_of(env.controlled)),
+        "buildings": sum(counts.values()),
+        "routes": env.controlled.routes_established,
+        "food": round(env.controlled.food_stock, 1),
+    }
+    return survived_ticks, peak, end, round(reward_total, 3)
+
+
+def paired_permutation_pvalue(a, b, n_perm: int = 10_000,
+                              seed: int = 0) -> float | None:
+    """Two-sided paired permutation test. Returns None when there is no
+    variance (all differences zero) — no signal to test."""
+    import numpy as np
+
+    diff = np.asarray(a, dtype=np.float64) - np.asarray(b, dtype=np.float64)
+    if not diff.any():
+        return None
+    rng = np.random.default_rng(seed)
+    observed = abs(diff.mean())
+    hits = 0
+    for _ in range(n_perm):
+        signs = rng.choice([-1.0, 1.0], size=len(diff))
+        if abs(float((diff * signs).mean())) >= observed - 1e-12:
+            hits += 1
+    return round((hits + 1) / (n_perm + 1), 4)
 
 
 def evaluate_vs_baseline(
@@ -383,12 +453,17 @@ def evaluate_vs_baseline(
     ticks: int = 3000,
     size: int = 256,
     num_settlements: int = 5,
+    disaster_mult: float = 1.0,
+    gather_mult: float = 1.0,
 ) -> dict:
     """Paired A/B evaluation on identical world seeds.
 
-    Returns aggregate results including win fraction on survival time
-    (Sprint 14 acceptance: policy wins in >=60% of worlds)."""
+    Sprint 17: collects survival, peak population, end-state territory/
+    buildings/routes, and cumulative §6.4 reward for BOTH controllers
+    (shared reward measurement), plus per-metric statistical significance."""
     import numpy as np
+
+    from scipy.stats import wilcoxon
 
     from stable_baselines3 import PPO
 
@@ -396,37 +471,157 @@ def evaluate_vs_baseline(
     results: list[PairedResult] = []
     wins = 0
     ties = 0
+    reward_wins = 0
     for i in range(num_worlds):
         seed = first_seed + i
-        base_surv, base_peak = _run_baseline(seed, size, num_settlements,
-                                             ticks)
-        pol_surv, pol_peak = _run_policy(model, seed, size, num_settlements,
-                                         ticks)
+        base_surv, base_peak, base_end, base_reward = _run_baseline(
+            seed, size, num_settlements, ticks, disaster_mult, gather_mult
+        )
+        pol_surv, pol_peak, pol_end, pol_reward = _run_policy(
+            model, seed, size, num_settlements, ticks, disaster_mult,
+            gather_mult
+        )
         if pol_surv > base_surv:
             wins += 1
         elif pol_surv == base_surv:
             ties += 1
+        if pol_reward > base_reward:
+            reward_wins += 1
         results.append(PairedResult(
             seed=seed,
             baseline_survival_ticks=base_surv,
             policy_survival_ticks=pol_surv,
             baseline_peak_population=base_peak,
             policy_peak_population=pol_peak,
+            baseline_territory=base_end["territory"],
+            policy_territory=pol_end["territory"],
+            baseline_buildings=base_end["buildings"],
+            policy_buildings=pol_end["buildings"],
+            baseline_routes_established=base_end["routes"],
+            policy_routes_established=pol_end["routes"],
+            baseline_reward=base_reward,
+            policy_reward=pol_reward,
         ))
     mean_base = float(np.mean([r.baseline_survival_ticks for r in results]))
     mean_pol = float(np.mean([r.policy_survival_ticks for r in results]))
     decided = num_worlds - ties
+
+    # Per-metric means + Wilcoxon signed-rank significance (Sprint 17).
+    metric_defs = {
+        "survival_ticks": ("baseline_survival_ticks",
+                           "policy_survival_ticks"),
+        "peak_population": ("baseline_peak_population",
+                            "policy_peak_population"),
+        "territory": ("baseline_territory", "policy_territory"),
+        "buildings": ("baseline_buildings", "policy_buildings"),
+        "routes_established": ("baseline_routes_established",
+                               "policy_routes_established"),
+        "cumulative_reward": ("baseline_reward", "policy_reward"),
+    }
+    metrics = {}
+    for name, (b_field, p_field) in metric_defs.items():
+        b_vals = [getattr(r, b_field) for r in results]
+        p_vals = [getattr(r, p_field) for r in results]
+        try:
+            _, p_value = wilcoxon(b_vals, p_vals)
+            p_value = round(float(p_value), 4)
+        except ValueError:
+            p_value = None  # all differences zero — no variance
+        metrics[name] = {
+            "baseline_mean": round(float(np.mean(b_vals)), 2),
+            "policy_mean": round(float(np.mean(p_vals)), 2),
+            "delta": round(float(np.mean(p_vals) - np.mean(b_vals)), 2),
+            "wilcoxon_p": p_value,
+        }
+
     return {
         "worlds": num_worlds,
+        "difficulty": {
+            "disaster_chance_mult": disaster_mult,
+            "gather_mult": gather_mult,
+        },
         "policy_wins": wins,
         "ties": ties,
+        "reward_wins": reward_wins,
         "win_fraction_strict": round(wins / num_worlds, 3),
-        "win_fraction_of_decided": round(wins / decided, 3) if decided else None,
+        "win_fraction_of_decided": (
+            round(wins / decided, 3) if decided else None
+        ),
+        "reward_win_fraction": round(reward_wins / num_worlds, 3),
         "mean_baseline_survival": round(mean_base, 1),
         "mean_policy_survival": round(mean_pol, 1),
         "mean_baseline_peak_pop": float(np.mean(
             [r.baseline_peak_population for r in results])),
         "mean_policy_peak_pop": float(np.mean(
             [r.policy_peak_population for r in results])),
+        "metrics": metrics,
         "results": [asdict(r) for r in results],
     }
+
+
+def generate_report(results: dict, out_md: str | Path,
+                    out_png: str | Path | None = None) -> Path:
+    """Write a markdown comparison report (+ optional bar-chart PNG)."""
+    md_path = Path(out_md)
+    lines = [
+        "# Policy vs Rule-Based Baseline — Evaluation Report",
+        "",
+        f"- Worlds evaluated: **{results['worlds']}**",
+        f"- Difficulty: {results.get('difficulty', {})}",
+        f"- Survival win fraction (strict): "
+        f"**{results['win_fraction_strict']*100:.0f}%** "
+        f"(ties: {results['ties']})",
+        f"- Reward win fraction: **{results['reward_win_fraction']*100:.0f}%**",
+        "",
+        "## Metric summary",
+        "",
+        "| Metric | Baseline | Policy | Delta | Wilcoxon p |",
+        "|---|---|---|---|---|",
+    ]
+    for name, m in results.get("metrics", {}).items():
+        p_str = str(m["wilcoxon_p"]) if m["wilcoxon_p"] is not None else "n/a"
+        sig = " *" if m["wilcoxon_p"] is not None and m["wilcoxon_p"] < 0.05 else ""
+        lines.append(
+            f"| {name} | {m['baseline_mean']} | {m['policy_mean']} | "
+            f"{m['delta']:+} | {p_str}{sig} |"
+        )
+    lines += ["", "* p < 0.05 (Wilcoxon signed-rank)", ""]
+    lines += ["## Per-world detail", "",
+              "| Seed | Surv B | Surv P | Peak B | Peak P | Terr B | Terr P |"
+              " Bld B | Bld P | Reward B | Reward P |",
+              "|---|---|---|---|---|---|---|---|---|---|---|"]
+    for r in results["results"]:
+        lines.append(
+            f"| {r['seed']} | {r['baseline_survival_ticks']} | "
+            f"{r['policy_survival_ticks']} | "
+            f"{r['baseline_peak_population']} | "
+            f"{r['policy_peak_population']} | {r['baseline_territory']} | "
+            f"{r['policy_territory']} | {r['baseline_buildings']} | "
+            f"{r['policy_buildings']} | {r['baseline_reward']} | "
+            f"{r['policy_reward']} |"
+        )
+    md_path.write_text("\n".join(lines), encoding="utf-8")
+
+    if out_png is not None:
+        import matplotlib
+
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+        import numpy as np
+
+        names = list(results.get("metrics", {}).keys())
+        base_means = [results["metrics"][n]["baseline_mean"] for n in names]
+        pol_means = [results["metrics"][n]["policy_mean"] for n in names]
+        x = np.arange(len(names))
+        fig, ax = plt.subplots(figsize=(10, 5))
+        ax.bar(x - 0.2, base_means, 0.4, label="Baseline")
+        ax.bar(x + 0.2, pol_means, 0.4, label="Policy")
+        ax.set_xticks(x)
+        ax.set_xticklabels(names, rotation=20, ha="right")
+        ax.set_title("Policy vs Rule-Based Baseline (means over worlds)")
+        ax.legend()
+        fig.tight_layout()
+        Path(out_png).parent.mkdir(parents=True, exist_ok=True)
+        fig.savefig(out_png, dpi=120)
+        plt.close(fig)
+    return md_path

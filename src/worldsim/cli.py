@@ -210,6 +210,18 @@ def build_parser() -> argparse.ArgumentParser:
     eval_p.add_argument("--ticks", type=int, default=3000)
     eval_p.add_argument("--size", type=int, default=256)
     eval_p.add_argument("--settlements", type=int, default=5)
+    eval_p.add_argument(
+        "--difficulty", choices=["normal", "hard"], default="normal",
+        help="Hard worlds double disasters and halve passive gathering",
+    )
+    eval_p.add_argument(
+        "--report", default=None,
+        help="Write a markdown comparison report to this path (.md)",
+    )
+    eval_p.add_argument(
+        "--chart", default=None,
+        help="Optional bar-chart .png accompanying the report",
+    )
 
     cmp_p = rl_sub.add_parser(
         "compare",
@@ -701,11 +713,18 @@ def _cmd_rl_train(args: argparse.Namespace) -> int:
 
 def _cmd_rl_evaluate(args: argparse.Namespace) -> int:
     from .db import WorldStore
-    from .training import evaluate_vs_baseline, resolve_policy_path
+    from .training import (
+        evaluate_vs_baseline,
+        generate_report,
+        resolve_policy_path,
+    )
 
     if not args.policy_id and not args.model:
         print("provide --policy-id or --model", file=sys.stderr)
         return 2
+    disaster_mult, gather_mult = (
+        (2.0, 0.5) if args.difficulty == "hard" else (1.0, 1.0)
+    )
 
     store = WorldStore(DEFAULT_DB_PATH)
     try:
@@ -719,10 +738,13 @@ def _cmd_rl_evaluate(args: argparse.Namespace) -> int:
             ticks=args.ticks,
             size=args.size,
             num_settlements=args.settlements,
+            disaster_mult=disaster_mult,
+            gather_mult=gather_mult,
         )
         generation = (
             record["generation"] if record else (args.policy_id or "explicit")
         )
+        results["agent_type"] = f"policy_{generation}_vs_rulebased"
         store.insert_training_run({
             "policy_generation_a": generation,
             "eval_seed_base": args.first_seed,
@@ -733,6 +755,7 @@ def _cmd_rl_evaluate(args: argparse.Namespace) -> int:
             "mean_survival_a": results["mean_policy_survival"],
             "mean_survival_b": results["mean_baseline_survival"],
             "results_json": results,
+            "agent_type": results["agent_type"],
         })
     finally:
         store.close()
@@ -741,24 +764,42 @@ def _cmd_rl_evaluate(args: argparse.Namespace) -> int:
         checksum_note = f" (checksum verified {record['checksum'][:16]}...)"
     print(
         f"\nEvaluation over {results['worlds']} worlds "
-        f"[{generation}]{checksum_note}:\n"
+        f"[{generation}]{checksum_note} "
+        f"(difficulty: {args.difficulty}):\n"
         f"  policy wins (strict survival): {results['policy_wins']} "
         f"({results['win_fraction_strict']*100:.0f}%)\n"
         f"  ties: {results['ties']}\n"
+        f"  reward wins: {results['reward_wins']} "
+        f"({results['reward_win_fraction']*100:.0f}%)\n"
         f"  mean baseline survival: {results['mean_baseline_survival']} ticks\n"
         f"  mean policy survival:   {results['mean_policy_survival']} ticks\n"
         f"  mean peak pop — baseline {results['mean_baseline_peak_pop']:.0f} "
         f"vs policy {results['mean_policy_peak_pop']:.0f}"
     )
+    sig_lines = []
+    for name, m in results["metrics"].items():
+        if m["wilcoxon_p"] is not None and m["wilcoxon_p"] < 0.05:
+            sig_lines.append(f"    * {name}: p={m['wilcoxon_p']}")
+    if sig_lines:
+        print("  statistically significant differences (p<0.05):")
+        print("\n".join(sig_lines))
+    else:
+        print("  no statistically significant differences (p>=0.05)")
     out_dir = Path(resolved).parent
     out = out_dir / "eval_results.json"
     with out.open("w", encoding="utf-8") as fh:
         json.dump(results, fh, indent=2)
     print(f"results written to {out}")
+    report_path = args.report or str(out_dir / "eval_report.md")
+    chart_path = args.chart or str(out_dir / "eval_chart.png")
+    generate_report(results, report_path, chart_path)
+    print(f"report written to {report_path} (+ {chart_path})")
     return 0
 
 
-def _evaluate_generation(gen: str, args: argparse.Namespace) -> tuple[dict, dict]:
+def _evaluate_generation(gen: str, args: argparse.Namespace,
+                         disaster_mult: float = 1.0,
+                         gather_mult: float = 1.0) -> tuple[dict, dict]:
     from .db import WorldStore
     from .training import evaluate_vs_baseline, resolve_policy_path
 
@@ -774,7 +815,10 @@ def _evaluate_generation(gen: str, args: argparse.Namespace) -> tuple[dict, dict
         ticks=args.ticks,
         size=args.size,
         num_settlements=args.settlements,
+        disaster_mult=disaster_mult,
+        gather_mult=gather_mult,
     )
+    results["agent_type"] = f"policy_{gen}_vs_rulebased"
     return results, record
 
 
@@ -819,6 +863,7 @@ def _cmd_rl_compare(args: argparse.Namespace) -> int:
                 "mean_survival_a": res["mean_policy_survival"],
                 "mean_survival_b": res["mean_baseline_survival"],
                 "results_json": res,
+                "agent_type": res.get("agent_type"),
             })
     finally:
         store.close()

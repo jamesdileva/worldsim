@@ -217,6 +217,9 @@ class Simulation:
     # Perf: per-tick memo for full-grid scans (buildings/territory/roads).
     _tick_cache: dict = field(default_factory=dict)
     _cache_tick: int = -1
+    # Sprint 17: difficulty knobs for benchmark/evaluation worlds.
+    disaster_chance_mult: float = 1.0
+    gather_mult: float = 1.0
 
     @property
     def tick(self) -> int:
@@ -890,7 +893,9 @@ class Simulation:
                     self._kill(settlement)
 
     def _check_disasters(self) -> None:
-        event = roll_event(self.world.seed, self.tick, self.world.size)
+        chance = BASE_EVENT_CHANCE * self.disaster_chance_mult
+        event = roll_event(self.world.seed, self.tick, self.world.size,
+                           chance=min(chance, 1.0))
         if event is None:
             return
         self.disaster_events.append(event)
@@ -1436,9 +1441,9 @@ class Simulation:
             n = int(terrain_counts[i])
             if n == 0:
                 continue
-            produced["wood"] += n * profile.wood * GATHER_RATE
-            produced["stone"] += n * profile.stone * GATHER_RATE
-            produced["metal"] += n * profile.metal * GATHER_RATE
+            produced["wood"] += n * profile.wood * GATHER_RATE * self.gather_mult
+            produced["stone"] += n * profile.stone * GATHER_RATE * self.gather_mult
+            produced["metal"] += n * profile.metal * GATHER_RATE * self.gather_mult
         inv = settlement.resource_inventory
         for res, amount in produced.items():
             inv[res] = inv.get(res, 0.0) + amount

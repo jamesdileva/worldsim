@@ -148,13 +148,13 @@ CREATE TABLE IF NOT EXISTS training_runs (
     mean_survival_b REAL NOT NULL,
     results_json TEXT NOT NULL,
     created_at TEXT NOT NULL
-);
-"""
+);"""
 
 # Lightweight migration for databases created before a column existed.
 _MIGRATIONS = [
     "ALTER TABLE policy_checkpoints ADD COLUMN checksum TEXT",
     "ALTER TABLE policy_checkpoints ADD COLUMN size_bytes INTEGER",
+    "ALTER TABLE training_runs ADD COLUMN agent_type TEXT",
 ]
 
 
@@ -825,8 +825,8 @@ class WorldStore:
                 "INSERT INTO training_runs "
                 "(policy_generation_a, policy_generation_b, eval_seed_base, "
                 "worlds, wins_a, ties, win_fraction, mean_survival_a, "
-                "mean_survival_b, results_json, created_at) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "mean_survival_b, results_json, agent_type, created_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     metrics["policy_generation_a"],
                     metrics.get("policy_generation_b"),
@@ -838,6 +838,7 @@ class WorldStore:
                     metrics["mean_survival_a"],
                     metrics["mean_survival_b"],
                     json.dumps(metrics.get("results_json", {})),
+                    metrics.get("agent_type"),
                     created_at,
                 ),
             )

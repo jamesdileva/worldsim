@@ -5,6 +5,53 @@ Decisions worth remembering are marked **[DECISION]**.
 
 ---
 
+## Session 18 — 2026-08-20 — Sprint 17: Rigorous Comparison & Statistical Significance
+
+**What was built**
+- Difficulty knobs on Simulation (`disaster_chance_mult`, `gather_mult`),
+  threaded through WorldSimEnv; `rl evaluate --difficulty {normal,hard}`
+  (hard = 2× disasters, ½ passive gathering)
+- Shared reward measurement: baseline runs accumulate §6.4 reward for their
+  settlement via the SAME component function as the env — "higher average
+  reward than baseline" comparisons are now meaningful
+- Richer per-world metrics in PairedResult: end-state territory, buildings,
+  routes_established + cumulative reward (both controllers)
+- Statistics: `paired_permutation_pvalue()` (exact-ish, no new deps) +
+  Wilcoxon signed-rank per metric; results carry per-metric means/deltas/p
+  values
+- Reports: `generate_report()` writes markdown tables + matplotlib bar-chart
+  PNG; `rl evaluate --report --chart`
+- `training_runs.agent_type` column (migration), set on evaluation inserts
+- Tests: 9 new comparison tests
+
+**Verification (hard worlds, gen1, reduced run)**
+```
+4 worlds × 1000 ticks, disaster ×2 / gather ×0.5:
+  survival ties again — baseline survives hard worlds too at this scale
+  report + chart generated ✓; significance machinery exercised ✓
+```
+
+**Decisions**
+- **[DECISION] Permutation test over t-test**: exact-ish, assumption-free,
+  no scipy distribution tables needed. Note n≥6 pairs required for p<0.05.
+- **[DECISION] Difficulty = environment knobs, not agent handicaps** — both
+  controllers face identical conditions.
+- **[DECISION] Honest saturation documentation**: survival remains tied even
+  on hard worlds at current scales. Real differentiation requires much longer
+  horizons, metric innovation, or genuinely lethal conditions. The
+  measurement infrastructure now exists to detect it when it happens.
+
+**Gotchas**: an indentation bug from an edit dedented the gathering loop out
+of its for-body — wood income silently became zero (only last iteration's
+mountain variables applied). Caught by the gather-multiplier unit test.
+Also: missing-file must fail verification before any None-checksum skip.
+
+**Acceptance status**: 20-world pipeline ready ✓; significance machinery ✓;
+"higher reward on 15+ worlds" ✗ honestly reported (ties at current training/
+difficulty scales).
+
+---
+
 ## Session 17 — 2026-08-20 — Sprint 16: Policy Checkpoints & Model Versioning
 
 **Scope:** Phase 3 / Sprint 16 — checksums for corruption detection,

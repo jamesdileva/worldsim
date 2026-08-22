@@ -61,12 +61,16 @@ class WorldSimEnv(gym.Env):
         num_settlements: int = 5,
         max_ticks: int = MAX_EPISODE_TICKS,
         replay_capacity: int = 10_000,
+        disaster_chance_mult: float = 1.0,
+        gather_mult: float = 1.0,
     ) -> None:
         super().__init__()
         self.seed_value = seed
         self.size = size
         self.num_settlements = num_settlements
         self.max_ticks = max_ticks
+        self.disaster_chance_mult = disaster_chance_mult
+        self.gather_mult = gather_mult
 
         self.action_space = gym.spaces.Discrete(NUM_ACTIONS)
         self.observation_space = gym.spaces.Box(
@@ -89,7 +93,11 @@ class WorldSimEnv(gym.Env):
 
     def _reset_sim(self) -> None:
         world = World(seed=self.seed_value, size=self.size)
-        sim = Simulation(world)
+        sim = Simulation(
+            world,
+            disaster_chance_mult=self.disaster_chance_mult,
+            gather_mult=self.gather_mult,
+        )
         sim.spawn_settlements(count=self.num_settlements)
         self.sim = sim
         self.controlled = sim.settlements[0]
