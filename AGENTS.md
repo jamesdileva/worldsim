@@ -21,9 +21,9 @@ emergent strategies — all reproducible from a single seed.
 Stable-Baselines3 (PPO) + matplotlib + psutil + scipy.
 
 **Status:** Phase 1 ✅ (Milestone 1 "Living Ant Farm"), Phase 2 ✅
-(specialization/emergence), Phase 3 in progress (Sprint 18 done —
-measurement tooling complete; learning improvement NOT yet demonstrated,
-see honest finding below).
+(specialization/emergence), Phase 3 in progress (Sprint 18 done + learning
+remediation: controlled cohort healthy, no regressions; eval metrics still
+saturated).
 
 **Test tiers:** `pytest` = fast suite (~250 tests, ~3–5 min);
 `pytest -m slow` = long integration runs.
@@ -54,6 +54,7 @@ see honest finding below).
 | `1dbe0b4` | 16 | Policy checksums, registry resolution (`--policy-id`), training_runs, rl compare |
 | `923cb40` | 17 | Difficulty knobs, shared reward measurement, Wilcoxon/permutation significance, evaluation reports |
 | `ab780ec` | 18 | Multi-generation dashboard, learning curves, per-seed regression detection |
+| `44e34d1` | 18b | Learning remediation: entropy capture fix, configurable reward weights, controlled retraining (no regressions) |
 
 ---
 
@@ -139,6 +140,24 @@ Agents replace auto-rules; the frozen RL contract is born
 - Follow-ups: entropy capture fix (currently None), controlled training
   configs across generations, longer runs, reward-shaping rebalance guided
   by Sprint 13 component breakdowns.
+
+### Session 20 — Learning Remediation (this session)
+- Entropy capture fixed: SB3 logs `train/entropy_loss` (negative entropy),
+  never `train/entropy`. Also captures explained_variance + approx_kl as
+  policy-health indicators; summary gains final_entropy for collapse
+  detection.
+- `RewardWeights` dataclass: §6.4 shaping is now config, not code. Rebalanced
+  defaults from breakdown data (population gain ×2.5, building delta ÷2.5).
+- Controlled retraining cohort gen1r/gen2r/gen3r (identical configs, only
+  timesteps differ): **regression resolved** — no gen3r-vs-gen1r losses.
+- Training health now demonstrably good: returns 6.5→10.2→13.9 monotonic,
+  explained variance 0.54→0.81, entropy converging without collapse.
+- **[WHY] Controlled configs first**: the Sprint 18 regression was caused by
+  uncontrolled cross-generation setups, not by RL being impossible — proven
+  by the controlled cohort's clean results before any deeper changes.
+- Remaining gap: eval metrics (survival/peak-pop) still saturate at food-
+  carrying equilibrium; eval-visible improvement needs harder worlds or
+  efficiency-style metrics at longer horizons.
 
 ---
 
