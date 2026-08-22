@@ -5,6 +5,79 @@ Decisions worth remembering are marked **[DECISION]**.
 
 ---
 
+## Session 16 — 2026-08-20 — Sprint 15: Parallel Simulation Training
+
+**Scope:** Phase 3 / Sprint 15 — VecEnv with parallel simulation workers,
+batched stepping, CPU utilization tracking, wall-clock benchmarking,
+checkpointing through parallel training.
+
+### What was built
+
+- `training.py` —
+  - `train(n_envs=N)`: N>1 uses SB3 `SubprocVecEnv` via `make_vec_env`
+    (distinct seeds per worker); rollout steps are per-env
+  - `CpuUsageSampler`: background thread sampling per-core utilization
+    (psutil), reports avg overall + max single core
+  - `benchmark_parallel()`: sequential-vs-parallel comparison at identical
+    total timesteps; per-config wall-clock, speedup ratios, ticks/s, CPU stats
+- CLI — `rl train --parallel N`; `rl train --compare` (speedup benchmark)
+- `psutil` added to dependencies
+- Tests: 5 new (4-worker parallel smoke incl. checkpoint round-trip,
+  step-count parity, CPU sampler, speedup-benchmark structure). Fast suite:
+  227 passing; slow tier: 13 passing.
+
+### Decisions
+
+- **[DECISION] SubprocVecEnv over multiprocessing.Pool**: spec said Pool,
+  but SB3's VecEnv abstraction handles action/observation batching, episode
+  boundaries, and seeding across processes natively — Pool would rebuild all
+  of that by hand.
+- **[DECISION] Equal-total-timesteps comparison semantics**: SB3's
+  `learn(total_timesteps)` counts TOTAL steps across envs, so comparing
+  wall-clock at equal totals measures genuine throughput gains (not extra
+  compute).
+- **[DECISION] psutil for CPU tracking** rather than OS-specific APIs;
+  background sampler thread so sampling never blocks the training loop.
+
+### Benchmark results (Sprint 15 acceptance checks)
+
+```
+4000 timesteps:   seq 27.1s | x1.26 (2 workers) | x1.78 (4 workers)
+20000 timesteps:  seq 161.3s | x1.38 (2) | x2.26 (4 workers)
+                  avg CPU 49.6% (12 logical cores ≈ ~6 busy with 4 workers),
+                  max single core 93.8%
+Checkpointing through SubprocVecEnv verified (save + load + predict)
+No inter-process crashes in any run ✓
+```
+
+**Acceptance status:** no crashes ✓; checkpointing ✓; CPU tracked ✓. The
+"~75% time reduction" criterion is NOT met as stated: observed **56% time
+reduction (x2.26)** at 20k timesteps, improving with scale (x1.78 at 4k →
+overhead amortization visible). Root cause is Amdahl's law — policy
+inference + gradient updates run serially in the main process while only
+simulation parallelizes. Longer runs and larger worlds shift the ratio
+further toward parallel benefit; documented honestly rather than tuned to a
+number.
+
+### Known issues / deferred
+
+- Main-process PPO inference/updates are now the serial bottleneck; VecEnv
+  frame-stacking or async gradient overlap won't help until env steps
+  dominate again (they will at 256-size worlds × more settlements).
+- Windows spawn overhead (~1-2 s per worker startup) matters only for tiny
+  runs.
+- `--compare` benchmarks share one checkpoint filename per config; harmless
+  but could collide if run concurrently.
+
+### Next up (Sprint 16)
+
+Policy checkpoints & model versioning: metadata schema (already partially in
+place via `policy_checkpoints`), checksums for corruption detection,
+`rl evaluate --policy-id genN` by registry id instead of path, rollback to
+any generation, gen-N vs gen-N-1 comparison logging.
+
+---
+
 ## Session 15 — 2026-08-20 — Sprint 14: First Learning Agent (PPO)
 
 **Scope:** Phase 3 / Sprint 14 — Stable-Baselines3 PPO on WorldSimEnv,

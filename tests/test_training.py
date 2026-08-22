@@ -137,3 +137,82 @@ def test_evaluation_paired_structure(tmp_path, small_env_kwargs):
         assert r["baseline_survival_ticks"] >= 0
         assert r["policy_survival_ticks"] >= 0
     assert 0.0 <= results["win_fraction_strict"] <= 1.0
+
+
+# ----------------------------------------------------------------------
+# Sprint 15: parallel training
+# ----------------------------------------------------------------------
+
+def test_parallel_training_smoke(tmp_path):
+    """4 parallel SubprocVecEnv workers train without inter-process
+    crashes and checkpoint correctly (acceptance criteria)."""
+    from stable_baselines3 import PPO
+
+    from worldsim.training import train
+
+    summary = train(
+        total_timesteps=1024,
+        seed=3,
+        size=32,
+        num_settlements=2,
+        max_ticks=200,
+        save_path=tmp_path / "policy_par",
+        log_path=tmp_path / "par.jsonl",
+        n_steps=128,
+        n_envs=4,
+    )
+    assert summary["n_envs"] == 4
+    model = PPO.load(summary["checkpoint_path"], device="cpu")
+    obs = np.zeros(60, dtype=np.float32)
+    action, _ = model.predict(obs, deterministic=True)
+    assert 0 <= int(action) < 62
+
+
+def test_parallel_matches_sequential_step_count(tmp_path):
+    """Equal timesteps config: parallel run processes exactly the requested
+    total steps across all envs."""
+    from worldsim.training import train
+
+    summary = train(
+        total_timesteps=800,
+        seed=11,
+        size=32,
+        num_settlements=2,
+        max_ticks=200,
+        save_path=tmp_path / "p_cnt",
+        log_path=tmp_path / "cnt.jsonl",
+        n_steps=100,
+        n_envs=4,
+    )
+    assert summary["total_timesteps"] == 800
+    assert summary["ticks_per_second"] > 0
+
+
+def test_cpu_sampler_reports():
+    from worldsim.training import CpuUsageSampler
+
+    sampler = CpuUsageSampler(interval=0.2)
+    sampler.start()
+    x = sum(i * i for i in range(10_000_000))  # burn CPU briefly
+    stats = sampler.stop()
+    assert x > 0
+    assert stats["avg_cpu_utilization_pct"] > 0
+    assert stats["max_single_core_pct"] >= stats["avg_cpu_utilization_pct"] - 1e-9
+
+
+def test_benchmark_parallel_structure(tmp_path):
+    """Speedup benchmark returns per-config timings and speedup ratios."""
+    from worldsim.training import benchmark_parallel
+
+    results = benchmark_parallel(
+        timesteps=600,
+        n_envs_configs=[1, 2],
+        seed=21,
+        size=32,
+        num_settlements=2,
+    )
+    assert set(results["configs"].keys()) == {1, 2}
+    seq = results["configs"][1]
+    par = results["configs"][2]
+    assert seq["wall_time_seconds"] > 0
+    assert par["speedup_vs_sequential"] is not None

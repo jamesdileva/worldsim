@@ -189,6 +189,14 @@ def build_parser() -> argparse.ArgumentParser:
         "--save-dir", default="data/world_sim/policies",
         help="Directory for checkpoints and logs",
     )
+    train_p.add_argument(
+        "--parallel", type=int, default=1,
+        help="Number of parallel simulation workers (SubprocVecEnv)",
+    )
+    train_p.add_argument(
+        "--compare", action="store_true",
+        help="Run sequential-vs-parallel speedup benchmark and exit",
+    )
     eval_p = rl_sub.add_parser(
         "evaluate", help="Paired evaluation: trained policy vs rule-based"
     )
@@ -637,7 +645,14 @@ def cmd_rl(args: argparse.Namespace) -> int:
 
 def _cmd_rl_train(args: argparse.Namespace) -> int:
     from .db import WorldStore
-    from .training import train
+    from .training import benchmark_parallel, train
+
+    if args.compare:
+        results = benchmark_parallel(timesteps=args.timesteps, seed=args.seed,
+                                     size=args.size,
+                                     num_settlements=args.settlements)
+        print(json.dumps(results, indent=2))
+        return 0
 
     save_dir = Path(args.save_dir)
     summary = train(
@@ -649,6 +664,7 @@ def _cmd_rl_train(args: argparse.Namespace) -> int:
         save_path=save_dir / f"policy_{args.generation}",
         log_path=save_dir / "train_log.jsonl",
         verbose=0,
+        n_envs=args.parallel,
     )
     store = WorldStore(DEFAULT_DB_PATH)
     try:

@@ -1,4 +1,5 @@
-"""PPO training and evaluation against the rule-based baseline (Sprint 14).
+"""PPO training and evaluation against the rule-based baseline (Sprint 14),
+with parallel VecEnv training and speedup measurement (Sprint 15).
 
 Training runs PPO over WorldSimEnv; evaluation performs paired A/B runs on
 identical world seeds: settlement 0 driven by the trained policy vs the same
@@ -8,12 +9,108 @@ settlement under the rule-based baseline, comparing survival time.
 from __future__ import annotations
 
 import json
+import threading
 import time
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
 POLICIES_DIR = Path("data/world_sim/policies")
 DEFAULT_LOG_PATH = POLICIES_DIR / "train_log.jsonl"
+
+
+class CpuUsageSampler:
+    """Background thread sampling per-core CPU utilization during training
+    (Sprint 15: track which cores are used and how hard)."""
+
+    def __init__(self, interval: float = 1.0) -> None:
+        self.interval = interval
+        self.samples_overall: list[float] = []
+        self.max_core_samples: list[float] = []
+        self._stop_event = threading.Event()
+        self._thread: threading.Thread | None = None
+
+    def start(self) -> None:
+        import psutil
+
+        psutil.cpu_percent(interval=None, percpu=True)  # prime counters
+
+        def loop():
+            while not self._stop_event.is_set():
+                per_core = psutil.cpu_percent(interval=self.interval,
+                                              percpu=True)
+                if per_core:
+                    self.samples_overall.append(sum(per_core) / len(per_core))
+                    self.max_core_samples.append(max(per_core))
+
+        self._thread = threading.Thread(target=loop, daemon=True)
+        self._thread.start()
+
+    def stop(self) -> dict:
+        if self._thread is not None:
+            self._stop_event.set()
+            self._thread.join(timeout=self.interval * 2 + 1)
+            self._thread = None
+        overall = (
+            sum(self.samples_overall) / len(self.samples_overall)
+            if self.samples_overall else 0.0
+        )
+        max_core = (
+            max(self.max_core_samples) if self.max_core_samples else 0.0
+        )
+        return {
+            "avg_cpu_utilization_pct": round(overall, 1),
+            "max_single_core_pct": round(max_core, 1),
+        }
+
+
+def benchmark_parallel(
+    timesteps: int = 4000,
+    n_envs_configs: list[int] | None = None,
+    seed: int = 42,
+    size: int = 64,
+    num_settlements: int = 3,
+    max_ticks: int = 1000,
+) -> dict:
+    """Compare sequential vs parallel wall-clock at identical total
+    timesteps. Returns per-config timings, speedup ratios, and CPU stats."""
+    if n_envs_configs is None:
+        n_envs_configs = [1, 2, 4]
+    results = {}
+    baseline_wall = None
+    cpu = CpuUsageSampler()
+    for n_envs in n_envs_configs:
+        save_path = POLICIES_DIR / f"bench_n{n_envs}"
+        log_path = POLICIES_DIR / f"bench_n{n_envs}_log.jsonl"
+        cpu.start()
+        summary = train(
+            total_timesteps=timesteps,
+            seed=seed,
+            size=size,
+            num_settlements=num_settlements,
+            max_ticks=max_ticks,
+            save_path=save_path,
+            log_path=log_path,
+            n_envs=n_envs,
+        )
+        stats = cpu.stop()
+        wall = summary["wall_time_seconds"]
+        if baseline_wall is None:
+            baseline_wall = wall
+        speedup = round(baseline_wall / wall, 2) if wall else None
+        results[n_envs] = {
+            "wall_time_seconds": wall,
+            "speedup_vs_sequential": speedup,
+            "ticks_per_second": summary["ticks_per_second"],
+            **stats,
+        }
+        print(
+            f"  n_envs={n_envs}: {wall}s ({summary['ticks_per_second']} "
+            f"ticks/s), speedup x{speedup}, avg CPU {stats['avg_cpu_utilization_pct']}%"
+        )
+    return {
+        "timesteps": timesteps,
+        "configs": results,
+    }
 
 
 class EpisodeMetricsCallback:
@@ -99,23 +196,43 @@ def train(
     log_path: str | Path = DEFAULT_LOG_PATH,
     n_steps: int = 512,
     verbose: int = 0,
+    n_envs: int = 1,
 ) -> dict:
     """Train PPO via model.learn(). Saves checkpoint to save_path (SB3
-    appends .zip). Returns metrics summary."""
+    appends .zip). Returns metrics summary.
+
+    n_envs > 1 runs parallel simulation workers (SubprocVecEnv); SB3's
+    total_timesteps then counts TOTAL steps across all envs, so equal-
+    timesteps comparisons measure throughput gains fairly."""
     from stable_baselines3 import PPO
     from stable_baselines3.common.monitor import Monitor
 
     from .env import WorldSimEnv
 
-    env = Monitor(WorldSimEnv(seed=seed, size=size,
-                              num_settlements=num_settlements,
-                              max_ticks=max_ticks))
+    env_kwargs = dict(size=size, num_settlements=num_settlements,
+                      max_ticks=max_ticks)
+    if n_envs > 1:
+        from stable_baselines3.common.env_util import make_vec_env
+        from stable_baselines3.common.vec_env import SubprocVecEnv
+
+        env = make_vec_env(
+            WorldSimEnv,
+            n_envs=n_envs,
+            seed=seed,
+            vec_env_cls=SubprocVecEnv,
+            env_kwargs=env_kwargs,
+        )
+        rollout_steps = max(1, min(n_steps, max_ticks))
+    else:
+        env = Monitor(WorldSimEnv(seed=seed, **env_kwargs))
+        rollout_steps = min(n_steps, max_ticks)
+
     model = PPO(
         "MlpPolicy",
         env,
         seed=seed,
         verbose=verbose,
-        n_steps=min(n_steps, max_ticks),
+        n_steps=rollout_steps,
         batch_size=64,
         learning_rate=3e-4,
         policy_kwargs=dict(net_arch=[128, 128]),
@@ -134,7 +251,9 @@ def train(
 
     summary = {
         "total_timesteps": total_timesteps,
+        "n_envs": n_envs,
         "wall_time_seconds": round(wall_time, 1),
+        "ticks_per_second": round(total_timesteps / wall_time, 1),
         "checkpoint_path": f"{save_path}.zip",
         **metrics.summary(),
     }
