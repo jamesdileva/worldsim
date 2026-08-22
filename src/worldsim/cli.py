@@ -261,8 +261,13 @@ def build_parser() -> argparse.ArgumentParser:
         help="Population-based generational training (Sprint 19)",
     )
     evo.add_argument("--population", type=int, default=4,
-                     help="Candidates per generation")
+                     help="Fresh candidates per generation")
     evo.add_argument("--generations", type=int, default=2)
+    evo.add_argument("--mutants", type=int, default=2,
+                     help="Gaussian-noise children of the champion per gen")
+    evo.add_argument("--mutation-strength", type=float, default=0.05)
+    evo.add_argument("--eval-ticks", type=int, default=300,
+                     help="Rollout ticks used to score mutants")
     evo.add_argument("--timesteps-per-candidate", type=int, default=4096)
     evo.add_argument("--seed-base", type=int, default=1000,
                      help="Base seed; each candidate gets seed_base + offsets")
@@ -999,19 +1004,23 @@ def _cmd_rl_evolve(args: argparse.Namespace) -> int:
     results = evolve(
         generations=args.generations,
         population_size=args.population,
+        n_mutants=args.mutants,
+        mutation_strength=args.mutation_strength,
         timesteps_per_candidate=args.timesteps_per_candidate,
         seed_base=args.seed_base,
         size=args.size,
         num_settlements=args.settlements,
         max_ticks=args.max_ticks,
         n_envs=args.parallel,
+        eval_ticks=args.eval_ticks,
     )
     print("\nEvolution summary:")
     for gen_result in results["generations"]:
         print(
             f"  {gen_result['generation']}: champion="
             f"{gen_result['champion']} "
-            f"(return {gen_result['champion_mean_return']}, "
+            f"(origin={gen_result.get('champion_origin')}, "
+            f"score {gen_result['champion_score']:.4f}, "
             f"parent={gen_result['parent']})"
         )
     out = POLICIES_LOG_DIR / "evolve_results.json"

@@ -5,6 +5,48 @@ Decisions worth remembering are marked **[DECISION]**.
 
 ---
 
+## Session 22 — 2026-08-20 — Sprint 20: Selection, Mutation & Strategy Evolution
+
+**What was built**
+- `population.py` —
+  - `mutate_checkpoint()`: Gaussian noise injected into all policy params,
+    scaled by each tensor's own std; topology preserved, child loads cleanly
+  - `quick_eval()`: cheap cumulative-reward rollout for scoring mutants
+    (no baseline run, no persistence)
+  - `evolve()` v2: per generation — **elite** (champion carried unchanged),
+    **n mutants** (children of champion at escalating strengths), and
+    **fresh random candidates**; selection across all three by score
+  - `strategy_shift_report()`: runs each generation's champion in a small
+    world, reports settlement strategy-label distributions (Sprint 11 labels)
+- `training.register_checkpoint()` gains parent/mutation lineage kwargs
+- `db.py` — `mutation` column (migration)
+- CLI — `rl evolve --mutants --mutation-strength --eval-ticks`
+- Tests: 3 new (mutation changes weights not shape; elite+mutants present
+  with lineage; strategy-shift report). Fast suite: 260 passing.
+
+### Decisions
+
+- **[DECISION] Mutants scored by cheap rollouts, not training**: mutation +
+  quick_eval gives real evolutionary pressure without gradient cost. Fresh
+  trained candidates keep training-return as their score.
+- **[DECISION] Noise scaled per-tensor by param std** so layers with large
+  weights aren't destabilized relative to small ones.
+- **[DECISION] Parent lineage points at the exact champion checkpoint label**
+  (e.g., gen1_c0), not just the generation — full chains queryable.
+- **[DECISION] Elite wins score ties** via deterministic tie-break ordering.
+
+### Verification
+
+```
+rl evolve --population 1 --generations 2 --mutants 2 (tiny worlds):
+  gen1 champion gen1_c0 (fresh, 0.8113)
+  gen2 candidates = elite(gen1_c0) + 2 mutants; ELITE WON the tie (0.8113)
+  lineage: gen2_e parent=gen1_c0, mutation=elite ✓
+strategy_shift_report: returns per-generation label distributions ✓
+```
+
+---
+
 ## Session 21 — 2026-08-20 — Sprint Docs Expansion + Sprint 19: Populations & Generational Training
 
 ### Part 1 — Roadmap docs expanded

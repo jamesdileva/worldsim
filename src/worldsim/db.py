@@ -156,6 +156,7 @@ _MIGRATIONS = [
     "ALTER TABLE policy_checkpoints ADD COLUMN size_bytes INTEGER",
     "ALTER TABLE training_runs ADD COLUMN agent_type TEXT",
     "ALTER TABLE policy_checkpoints ADD COLUMN parent TEXT",
+    "ALTER TABLE policy_checkpoints ADD COLUMN mutation TEXT",
 ]
 
 
@@ -782,8 +783,8 @@ class WorldStore:
                 "INSERT INTO policy_checkpoints "
                 "(generation, path, algorithm, total_timesteps, episodes, "
                 "mean_episode_return, wall_time_seconds, checksum, size_bytes,"
-                " parent, created_at) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                " parent, mutation, created_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     metrics.get("generation", "gen1"),
                     metrics["path"],
@@ -795,6 +796,7 @@ class WorldStore:
                     metrics.get("checksum"),
                     metrics.get("size_bytes"),
                     metrics.get("parent"),
+                    metrics.get("mutation"),
                     created_at,
                 ),
             )
@@ -806,7 +808,7 @@ class WorldStore:
         row = self._conn.execute(
             "SELECT id, generation, path, algorithm, total_timesteps, "
             "episodes, mean_episode_return, wall_time_seconds, checksum, "
-            "size_bytes, parent, created_at FROM policy_checkpoints "
+            "size_bytes, parent, mutation, created_at FROM policy_checkpoints "
             "WHERE generation = ? ORDER BY id DESC LIMIT 1",
             (generation,),
         ).fetchone()
@@ -815,7 +817,7 @@ class WorldStore:
         keys = [
             "id", "generation", "path", "algorithm", "total_timesteps",
             "episodes", "mean_episode_return", "wall_time_seconds",
-            "checksum", "size_bytes", "parent", "created_at",
+            "checksum", "size_bytes", "parent", "mutation", "created_at",
         ]
         return dict(zip(keys, row))
 

@@ -38,19 +38,24 @@ def verify_policy_checksum(path: str | Path, expected_sha256: str | None) -> boo
 
 
 def register_checkpoint(db_store, generation: str, path: str | Path,
-                        summary: dict) -> dict:
+                        summary: dict, parent: str | None = None,
+                        mutation: str | None = None) -> dict:
     """Hash the checkpoint file and record it in policy_checkpoints.
     Returns the registry record."""
-    zip_path = Path(f"{path}.zip")
+    zip_path = Path(path)
+    if zip_path.suffix != ".zip":
+        zip_path = Path(f"{zip_path}.zip")
     record = {
         "generation": generation,
         "path": str(zip_path),
-        "total_timesteps": summary["total_timesteps"],
+        "total_timesteps": summary.get("total_timesteps", 0),
         "episodes": summary.get("episodes"),
         "mean_episode_return": summary.get("mean_return"),
         "wall_time_seconds": summary.get("wall_time_seconds"),
         "checksum": file_sha256(zip_path),
         "size_bytes": zip_path.stat().st_size,
+        "parent": parent,
+        "mutation": mutation,
     }
     record["id"] = db_store.insert_policy_checkpoint(record)
     return record

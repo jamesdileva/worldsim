@@ -64,7 +64,7 @@ def test_population_trains_all_candidates_and_selects_champion(
     result = _train_population(store, tmp_path, "genA", population_size=2)
     labels = [c["label"] for c in result["candidates"]]
     assert labels == ["genA_c0", "genA_c1"]
-    champion = max(result["candidates"], key=lambda c: c["mean_return"])
+    champion = max(result["candidates"], key=lambda c: c["score"])
     assert result["champion"] == champion["label"]
     assert (tmp_path / "policy_genA.zip").exists()
 
@@ -124,7 +124,8 @@ def test_evolve_runs_generations_with_parent_chain(store, tmp_path):
     gens = results["generations"]
     assert [g["generation"] for g in gens] == ["gen1", "gen2"]
     assert gens[0]["parent"] is None
-    assert gens[1]["parent"] == "gen1"
+    # Parent lineage points at the exact champion checkpoint label.
+    assert gens[1]["parent"] == gens[0]["champion"]
     # Both bare-label checkpoints exist.
     assert (tmp_path / "policy_gen1.zip").exists()
     assert (tmp_path / "policy_gen2.zip").exists()
@@ -158,6 +159,105 @@ def test_policy_checkpoints_parent_column_migrated(tmp_path):
                 "PRAGMA table_info(policy_checkpoints)"
             ).fetchall()
         }
-        assert "parent" in cols
+        assert {"parent", "mutation"} <= cols
     finally:
         store.close()
+
+
+# ----------------------------------------------------------------------
+# Sprint 20: mutation & elitism
+# ----------------------------------------------------------------------
+
+def _train_single(tmp_path, label="base", seed=3):
+    from worldsim.training import train
+
+    return train(
+        total_timesteps=256, seed=seed,
+        size=32, num_settlements=2, max_ticks=120,
+        save_path=tmp_path / f"policy_{label}",
+        log_path=tmp_path / f"{label}.jsonl",
+        n_steps=64,
+    )
+
+
+def test_mutate_checkpoint_changes_weights_but_not_shape(tmp_path):
+    import numpy as np
+    from stable_baselines3 import PPO
+
+    from worldsim.population import mutate_checkpoint
+
+    summary = _train_single(tmp_path)
+    src = summary["checkpoint_path"]
+    out = mutate_checkpoint(src, tmp_path / "mutant.zip",
+                            strength=0.10, seed=42)
+    parent = PPO.load(src, device="cpu")
+    child = PPO.load(str(out), device="cpu")
+    parent_params = [p.detach().numpy() for p in parent.policy.parameters()]
+    child_params = [p.detach().numpy() for p in child.policy.parameters()]
+    assert len(parent_params) == len(child_params)
+    diffs = [
+        float(np.abs(p - c).sum()) for p, c in zip(parent_params, child_params)
+    ]
+    assert sum(diffs) > 0.0  # weights actually changed
+
+
+def test_elite_and_mutants_present_in_generation(tmp_path):
+    """Generation 2 candidates must include the elite (unchanged champion)
+    plus Gaussian mutants with lineage recorded."""
+    import worldsim.population as pop
+
+    original_dir = pop.POLICIES_DIR
+    pop.POLICIES_DIR = tmp_path
+    try:
+        results = pop.evolve(
+            generations=2,
+            population_size=1,   # fresh candidates per gen
+            n_mutants=2,
+            timesteps_per_candidate=256,
+            size=32,
+            num_settlements=2,
+            max_ticks=120,
+            eval_ticks=100,
+        )
+    finally:
+        pop.POLICIES_DIR = original_dir
+
+    gen2_candidates = results["generations"][1]["candidates"]
+    origins = {c["label"]: c.get("origin") for c in gen2_candidates}
+    assert origins.get("gen2_e") == "elite"
+    mutant_labels = [
+        lbl for lbl, o in origins.items() if o == "mutant"
+    ]
+    assert len(mutant_labels) == 2
+    for c in gen2_candidates:
+        if c.get("origin") in ("elite", "mutant"):
+            assert c["parent"] == results["generations"][0]["champion"]
+
+
+def test_strategy_shift_report_returns_distributions(tmp_path):
+    from worldsim.population import (
+        mutate_checkpoint,
+        quick_eval,
+        strategy_shift_report,
+    )
+    from worldsim.training import train
+
+    summary = _train_single(tmp_path)
+    mutant = mutate_checkpoint(summary["checkpoint_path"],
+                               tmp_path / "m.zip", strength=0.05, seed=1)
+    _ = quick_eval(mutant, ticks=80, size=32, num_settlements=2, seed=1)
+
+    report = strategy_shift_report(
+        {"genA": summary["checkpoint_path"], "genB": str(mutant)},
+        ticks=300, size=32, num_settlements=3,
+    )
+    assert set(report.keys()) == {"genA", "genB"}
+    for dist in report.values():
+        assert isinstance(dist, dict)
+        total_labels = sum(dist.values())
+        # Only living settlements are counted; at least one must exist.
+        if total_labels:
+            assert set(dist) <= {
+                "agricultural", "mining", "trading", "military",
+                "balanced", "settling",
+            }
