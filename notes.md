@@ -5,6 +5,43 @@ Decisions worth remembering are marked **[DECISION]**.
 
 ---
 
+## Session 29 — 2026-08-22 — Sprint 27: Strategic Reasoning
+
+**What was built**
+- `advice.py` — summaries in, structured strategic priorities out:
+  - `SYSTEM_PROMPT` (advisor role + strict JSON-only output contract) and
+    `USER_PROMPT_TEMPLATE`; `build_advice_prompt()` returns the pair
+  - `StrategicAdvice` (priorities list + rationale), `AdviceResult`
+    (ok/advice/error/raw/elapsed) mirroring Sprint 25's LLMResult pattern
+  - `parse_advice()`: strict JSON extraction (tolerates fences/chatter
+    around the object, nothing inside it); validates types; strips/caps
+    priorities at 5 non-empty strings; anything else -> None
+  - `advise(client, summary, name)`: never raises — server failures pass
+    through as ok=False, garbage becomes "unparseable model output"
+  - `AdviceLog`: append-only jsonl advisory side channel, never sim state
+- Advisory-only enforced: nothing executes, nothing touches sim physics.
+- 23 new tests: parser matrix (13 parametrized garbage cases), prompt
+  shape pins, degradation contract, log round-trip + live-gated slow test
+  enforcing >=90% parseability on real llama3.1:8b across 10 seeds x 2
+  settlements. Fast suite: 331 passing.
+
+### Decisions
+
+- **[DECISION] Strict-parse, degrade-loud**: malformed advice is a
+  first-class outcome (ok=False + error string), not an exception —
+  Sprint 28's validation layer builds on this exact contract.
+- **[DECISION] Tolerant shell, intolerant core**: markdown fences /
+  assistant chatter around the JSON are stripped by regex extraction;
+  inside the object, types must be exactly right (no leniency).
+- **[DECISION] Cap priorities at 5**: longer lists dilute attention and
+  Sprint 28 intent mapping works per-priority.
+- **Ops finding**: an aborted live-test run wedged Ollama (sequential
+  request queue stuck; /api/tags healthy but generation hung forever,
+  CLI spinner never produced tokens). Server restart fixed it. Live
+  round-trip after restart: PASS in 4m30s.
+
+---
+
 ## Session 28 — 2026-08-22 — Sprint 26: Settlement State Summarization
 
 **What was built**
