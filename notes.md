@@ -5,6 +5,58 @@ Decisions worth remembering are marked **[DECISION]**.
 
 ---
 
+## Session 24 — 2026-08-20 — Sprint 22: Self-Play / Civilization Competition
+
+**What was built**
+- `competition.py` —
+  - `run_head_to_head()`: k learned policies simultaneously control distinct
+    settlements in ONE shared world; controllers act first each tick
+    (simultaneous execution), then `sim.step(skip_agent_ids=...)` runs
+    shared mechanics with all controlled agents bypassed
+  - per-controller metrics: survival ticks, peak/final population,
+    cumulative §6.4 reward, end-state buildings/routes + territory/resource
+    SHARES across controllers
+  - `determine_winner()`: survival → territory-share tiebreak
+  - `head_to_head_eval()`: paired A-vs-B over many seeds with permutation
+    p-values on reward/territory differences
+  - accepts checkpoint paths or loaded models
+- CLI — `rl compare --gen-a --gen-b --head-to-head`: true policy-vs-policy
+  competition; match recorded in `training_runs` (agent_type=
+  'head_to_head', both generations filled)
+- Tests: 8 new. Fast suite: 272 passing.
+
+### Decisions
+
+- **[DECISION] Simultaneous pre-tick action execution**: all controller
+  actions run before the world tick, so neither controller sees the other's
+  move first within a tick (turn-order advantage still exists ACROSS ticks
+  via settlement index order — documented asymmetry).
+- **[DECISION] Shares computed across CONTROLLERS only** (rule-based
+  bystander settlements excluded from denominators) — measures competitive
+  balance among competitors.
+- **[DECISION] Runner accepts paths or loaded models**; winner = survival
+  then territory-share.
+
+### Findings
+
+```
+gen1r vs gen3r head-to-head (4 shared worlds × 1500 ticks):
+  gen3r wins 3-1 | mean reward 22.41 vs 6.19 | territory share 0.65 vs 0.35
+```
+
+**The Sprint 18 "regression" reverses under direct competition**: gen3r's
+controlled cohort showed identical survival/peak-pop vs gen1r (saturated
+metrics), but head-to-head reveals gen3r is competitively dominant. More
+training + rebalanced weights produced genuine competitive strength that
+baseline-relative measurement structurally could not see. This validates
+Sprint 22's premise: self-play metrics answer questions baseline-relative
+comparison cannot.
+
+Also noted: same-model sanity shows small A/B asymmetry (~1.5 reward) from
+turn order + spawn-site terrain quality — expected, bounded, documented.
+
+---
+
 ## Session 23 — 2026-08-20 — Sprint 21: Cross-Generation Learning
 
 **What was built**

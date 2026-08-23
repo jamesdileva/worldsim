@@ -234,6 +234,11 @@ def build_parser() -> argparse.ArgumentParser:
     cmp_p.add_argument("--ticks", type=int, default=3000)
     cmp_p.add_argument("--size", type=int, default=256)
     cmp_p.add_argument("--settlements", type=int, default=5)
+    cmp_p.add_argument(
+        "--head-to-head", action="store_true",
+        help="True policy-vs-policy competition in shared worlds "
+             "(Sprint 22) instead of two baseline-paired evaluations",
+    )
 
     dash = rl_sub.add_parser(
         "dashboard",
@@ -888,8 +893,10 @@ def _evaluate_generation(gen: str, args: argparse.Namespace,
 
 
 def _cmd_rl_compare(args: argparse.Namespace) -> int:
-    """Evaluate two generations vs baseline; report deltas and log both runs
-    into training_runs (gen N vs gen N-1 comparison, spec Sprint 16)."""
+    """Evaluate two generations; Sprint 22 --head-to-head runs true
+    policy-vs-policy competition in shared worlds."""
+    if args.head_to_head:
+        return _cmd_rl_head_to_head(args)
     res_a, rec_a = _evaluate_generation(args.gen_a, args)
     res_b, rec_b = _evaluate_generation(args.gen_b, args)
 
@@ -1050,6 +1057,75 @@ def _cmd_rl_evolve(args: argparse.Namespace) -> int:
     with out.open("w", encoding="utf-8") as fh:
         json.dump(results, fh, indent=2)
     print(f"results written to {out}")
+    return 0
+
+
+def _cmd_rl_head_to_head(args: argparse.Namespace) -> int:
+    """Sprint 22: true policy-vs-policy competition in shared worlds."""
+    from .db import WorldStore
+    from .competition import head_to_head_eval
+    from .training import resolve_policy_path
+
+    store = WorldStore(DEFAULT_DB_PATH)
+    try:
+        path_a, rec_a = resolve_policy_path(store, args.gen_a)
+        path_b, rec_b = resolve_policy_path(store, args.gen_b)
+    finally:
+        store.close()
+
+    results = head_to_head_eval(
+        model_path_a=path_a,
+        model_path_b=path_b,
+        num_worlds=args.worlds,
+        first_seed=args.first_seed,
+        ticks=args.ticks,
+        size=args.size,
+        disaster_mult=2.0 if getattr(args, "difficulty", None) == "hard" else 1.0,
+    )
+    print(
+        f"\nHead-to-head {args.gen_a} vs {args.gen_b} "
+        f"over {results['worlds']} shared worlds:\n"
+        f"  A wins: {results['a_wins']} | B wins: {results['b_wins']} | "
+        f"ties: {results['ties']}\n"
+        f"  mean cumulative reward — A {results['mean_reward_a']} vs "
+        f"B {results['mean_reward_b']}\n"
+        f"  mean territory share — A {results['mean_territory_share_a']} "
+        f"vs B {results['mean_territory_share_b']}"
+    )
+    for metric in ("reward_permutation_p", "territory_permutation_p"):
+        p = results[metric]
+        if p is not None and p < 0.05:
+            print(f"  * {metric}: p={p} (significant)")
+    out = Path("data/world_sim/policies/h2h_results.json")
+    with out.open("w", encoding="utf-8") as fh:
+        json.dump({
+            "gen_a": args.gen_a,
+            "gen_b": args.gen_b,
+            **results,
+        }, fh, indent=2)
+
+    store = WorldStore(DEFAULT_DB_PATH)
+    try:
+        store.insert_training_run({
+            "policy_generation_a": args.gen_a,
+            "policy_generation_b": args.gen_b,
+            "eval_seed_base": args.first_seed,
+            "worlds": results["worlds"],
+            "wins_a": results["a_wins"],
+            "ties": results["ties"],
+            "win_fraction": round(results["a_wins"] / max(1, results["worlds"]), 3),
+            "mean_survival_a": sum(
+                r["A_survival_ticks"] for r in results["results"]
+            ) / max(1, len(results["results"])),
+            "mean_survival_b": sum(
+                r["B_survival_ticks"] for r in results["results"]
+            ) / max(1, len(results["results"])),
+            "results_json": {"head_to_head": True, **results},
+            "agent_type": "head_to_head",
+        })
+    finally:
+        store.close()
+    print(f"results written to {out}; match recorded in training_runs")
     return 0
 
 
