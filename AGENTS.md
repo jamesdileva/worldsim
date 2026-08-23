@@ -27,7 +27,8 @@ COMPLETE (S25–30: Ollama client, summarization, strategic reasoning,
 intent→validated-action agent, scheduled background reasoning, and a LIVE
 paired comparison showing LLM advice significantly improves
 territory/buildings/reward; sprint docs expanded through Phase 10),
-**Phase 6 in progress** (S31 technology & eras done).
+**Phase 6 in progress** (S31 technology & eras done; S32 market
+economies done).
 
 **Test tiers:** `pytest` = fast suite (~250 tests, ~3–5 min);
 `pytest -m slow` = long integration runs.
@@ -72,6 +73,7 @@ territory/buildings/reward; sprint docs expanded through Phase 10),
 | `d740c70` | 29 | Reasoning scheduler (interval/event/struggling), single-flight background advisor, non-blocking sim loop |
 | `8784814` | 30 | Paired LLM-vs-rulebased comparison, Wilcoxon+permutation, llm compare CLI; live verdict: advice helps (**Phase 5 complete**) |
 | `085e5e0` | 31 | Technology & eras: deterministic research, four-tech tree, era gates on Mine/Granary, Era III bonuses (**Phase 6 begins**) |
+| `a35048f` | 32 | Market economies: derived prices, valuation-gap trade direction, gap-scaled shipments |
 
 ---
 
@@ -432,6 +434,30 @@ Agents replace auto-rules; the frozen RL contract is born
   were examining transposed tiles. Fixed with explicit ty/tx naming.
 - Test note: find_building_site returns (y, x); callers must use
   build_at(x=site[1], y=site[0]).
+
+### Session 34 — Sprint 32 (this session)
+- `markets.py`: derived world market prices per resource
+  (base × reference/(reference + 4×mean per-capita availability),
+  clamped [0.25, 8.0]; metal base 2×). Pure function of state — nothing
+  persisted, cannot desynchronize (mirrors derived-era philosophy).
+- `_trade_tick` rewrite: direction by largest valuation gap across both
+  route ends; shipment size linear in gap up to 4 units; Era III donors
+  +25% on top of the cap; clamped to donor stock; dust (<0.5) skipped.
+- Summaries: full world tier shows "Market prices per unit" so LLM
+  advisors can reason about the economy.
+- Live smoke: prices slid to floor as stockpiles grew (metal stayed
+  priciest); 1176 gap-scaled transfers over 400 ticks. Fast suite:
+  416 passing (3 Sprint 4 trade tests re-pinned to new invariants).
+- **[DECISION] Prices derived, never stored**: like eras — fewer fields,
+  no desync possible.
+- **[DECISION] Deficits clamp to zero in valuation math**: collapse can
+  drive inventories negative; min+1 denominator would hit exactly −1 →
+  ZeroDivisionError (found live via competition fixtures).
+- **[DECISION] Era III bonus applies after the unit cap**: cap limits
+  normal logistics; administration tech = superior commercial
+  organization that legitimately exceeds it.
+- **[DECISION] Direction by valuation gap, not raw surplus**: raw
+  differences ignore need; gaps route goods toward desperation.
 
 ---
 
