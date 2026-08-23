@@ -22,11 +22,12 @@ Stable-Baselines3 (PPO) + matplotlib + psutil + scipy + Ollama
 (stdlib-urllib client, Phase 5).
 
 **Status:** Phase 1 ✅, Phase 2 ✅, Phase 3 ✅ (Sprints 12–18 + remediation;
-learning healthy in training metrics, eval metrics saturated), **Phase 5 ✅
-COMPLETE** (S25–30: Ollama client, summarization, strategic reasoning,
+learning healthy in training metrics, eval metrics saturated), Phase 5 ✅
+COMPLETE (S25–30: Ollama client, summarization, strategic reasoning,
 intent→validated-action agent, scheduled background reasoning, and a LIVE
 paired comparison showing LLM advice significantly improves
-territory/buildings/reward; sprint docs expanded through Phase 10).
+territory/buildings/reward; sprint docs expanded through Phase 10),
+**Phase 6 in progress** (S31 technology & eras done).
 
 **Test tiers:** `pytest` = fast suite (~250 tests, ~3–5 min);
 `pytest -m slow` = long integration runs.
@@ -70,6 +71,7 @@ territory/buildings/reward; sprint docs expanded through Phase 10).
 | `0e30601` | 28 | Intent mapping onto frozen action space, pre-tick validation layer, LLMDrivenAgent with rule fallback |
 | `d740c70` | 29 | Reasoning scheduler (interval/event/struggling), single-flight background advisor, non-blocking sim loop |
 | `8784814` | 30 | Paired LLM-vs-rulebased comparison, Wilcoxon+permutation, llm compare CLI; live verdict: advice helps (**Phase 5 complete**) |
+| `085e5e0` | 31 | Technology & eras: deterministic research, four-tech tree, era gates on Mine/Granary, Era III bonuses (**Phase 6 begins**) |
 
 ---
 
@@ -407,6 +409,29 @@ Agents replace auto-rules; the frozen RL contract is born
   new test files — I clobbered Sprint 17's test_comparison.py and lost
   9 tests until collection counts flagged it (recovered as
   test_sprint17_eval.py).
+
+### Session 33 — Sprint 31 (this session)
+- `tech.py`: four technologies in fixed order (agriculture → masonry →
+  engineering → administration), era derivation (II needs agri+masonry,
+  III needs all four), Mine/Granary gated behind Era II, Era III grants
+  +15% farm output and +25% trade transfer size.
+- Settlement gains research_points/technologies; era is DERIVED. Sim
+  accumulates research per tick (0.05 × pop × era multiplier) and logs
+  technology/era events (event-mode LLM advice reacts automatically).
+- Gates at both legality layers: build_at refuses below-era builds;
+  intent validator drops with missing_technology_* reasons.
+- Live: both seed-42 settlements hit Era 2 by tick 600, byte-identical
+  timelines. Fast suite: 401 passing.
+- **[DECISION] No new actions, no obs changes**: frozen RL contract
+  sacred; eras gate EXISTING mechanics rather than wiring reserved
+  no-op action IDs (that would shift dynamics for trained policies).
+- **[DECISION] Era derived from techs, not stored**: fewer serialized
+  fields; techs vs era can never desynchronize.
+- **Bug fixed (latent since S28)**: territory_of yields (y, x) from
+  np.argwhere but the S28 intent validators unpacked as (x, y) — both
+  were examining transposed tiles. Fixed with explicit ty/tx naming.
+- Test note: find_building_site returns (y, x); callers must use
+  build_at(x=site[1], y=site[0]).
 
 ---
 
