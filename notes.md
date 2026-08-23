@@ -5,6 +5,53 @@ Decisions worth remembering are marked **[DECISION]**.
 
 ---
 
+## Session 32 — 2026-08-23 — Sprint 30: ML-only vs ML + LLM Comparison
+
+**What was built**
+- `comparison.py`:
+  - `_run_llm_arm()` mirrors Sprint 17's `_run_baseline` tick-for-tick
+    (same raw §6.4 component accumulation) but settlement 0 is driven by
+    an attached LLMDrivenAgent with a per-world BackgroundAdvisor
+  - `compare_llm_vs_baseline()`: paired seeds (first_seed + i for BOTH
+    arms), returns evaluate_vs_baseline-shaped dict so Sprint 17's
+    generate_report works unchanged; adds Wilcoxon AND permutation
+    p-values plus an "advice" telemetry block
+  - `verdict_text()`: honest one-liner — inconclusive when advice never
+    landed; names significant metrics BETTER/WORSE otherwise
+- CLI: `llm compare --worlds --ticks --advice-interval --difficulty ...`
+  — refuses to run when Ollama is unreachable (both arms would be
+  identical); writes report/chart and records the verdict in
+  training_runs (agent_type=llm_advised_vs_rulebased).
+- **LIVE VERDICT (10 paired worlds, hard difficulty): advice helps.**
+  182 validated LLM actions, 1 request failure. LLM arm significantly
+  better at territory (+333 tiles avg, Wilcoxon p=0.0039), buildings
+  (+10.2, p=0.002), cumulative reward (+0.2, p=0.002); survival/peak-pop
+  tie at saturation as expected. training_runs id=4.
+- 7 new tests. Fast suite: 388 passing.
+
+### Decisions
+
+- **[DECISION] Deterministic-degradation equivalence test**: with every
+  advice request failing, LLMDrivenAgent's fallback RuleBasedAgent(seed,
+  index) is identical to the replaced agent, so both arms must produce
+  byte-equal metrics — pinned by test_llm_down_arms_byte_identical.
+  Degradation can never fake a win.
+- **[DECISION] Doc-vs-reality reconciliation**: plan said "ML-only vs
+  ML+LLM"; actual Phase 5 shape compares rule-based vs rules+LLM — that
+  isolates exactly the "does advice help?" variable today.
+- **[WHY] Refuse-to-run when server down**: a comparison under total
+  degradation measures nothing and would record a meaningless row.
+- **Ops findings**: (1) the recurring Ollama wedge was caused by the
+  user's *other* project (sentinel backend) holding open connections and
+  saturating the local model — not our code; pausing it fixed generation.
+  (2) PowerShell `>` redirect writes UTF-16 — use cmd /c for git show
+  redirection. (3) A new test file must be name-checked against existing
+  files first: I clobbered Sprint 17's tests/test_comparison.py and lost
+  9 tests until collection counts caught it; recovered as
+  test_sprint17_eval.py.
+
+---
+
 ## Session 31 — 2026-08-23 — Sprint 29: Periodic AI Reasoning
 
 **What was built**

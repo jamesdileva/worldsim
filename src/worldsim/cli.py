@@ -331,7 +331,25 @@ def build_parser() -> argparse.ArgumentParser:
     ask.add_argument("--system", default=None,
                      help="Optional system prompt")
     ask.add_argument("--config", default=None,
-                    help="Path to llm_config.json")
+                     help="Path to llm_config.json")
+    cmp = llm_sub.add_parser(
+        "compare",
+        help="Paired worlds: rule-based vs rules+LLM advice (Sprint 30)")
+    cmp.add_argument("--worlds", type=int, default=10)
+    cmp.add_argument("--ticks", type=int, default=600)
+    cmp.add_argument("--size", type=int, default=64)
+    cmp.add_argument("--settlements", type=int, default=3)
+    cmp.add_argument("--first-seed", type=int, default=50_000)
+    cmp.add_argument("--advice-interval", type=int, default=60,
+                     help="Ticks between LLM advice requests")
+    cmp.add_argument("--difficulty", choices=["normal", "hard"],
+                     default="hard")
+    cmp.add_argument("--host", default=None)
+    cmp.add_argument("--model", default=None)
+    cmp.add_argument("--config", default=None,
+                     help="Path to llm_config.json")
+    cmp.add_argument("--report", default="llm_compare_report.md")
+    cmp.add_argument("--chart", default="llm_compare_chart.png")
     return parser
     return parser
 
@@ -1360,8 +1378,83 @@ def cmd_llm(args: argparse.Namespace) -> int:
         print(f"LLM error: {result.error}", file=sys.stderr)
         return 1
 
+    if args.llm_command == "compare":
+        return _cmd_llm_compare(args)
+
     print(f"unknown llm command: {args.llm_command}", file=sys.stderr)
     return 2
+
+
+def _cmd_llm_compare(args: argparse.Namespace) -> int:
+    """Sprint 30: paired rule-based vs LLM-advised evaluation."""
+    from .comparison import compare_llm_vs_baseline, verdict_text
+    from .db import WorldStore
+    from .llm import LLMConfig, OllamaClient
+    from .training import generate_report
+
+    overrides = {}
+    if args.host:
+        overrides["host"] = args.host
+    if args.model:
+        overrides["model"] = args.model
+    config = LLMConfig.load(path=args.config, overrides=overrides)
+
+    client = OllamaClient(config)
+    if not client.is_available():
+        print("Ollama unreachable — comparison would be meaningless with "
+              "both arms identical. Start the server and retry.",
+              file=sys.stderr)
+        return 1
+
+    disaster_mult, gather_mult = (
+        (2.0, 0.5) if args.difficulty == "hard" else (1.0, 1.0))
+    print(f"Comparing rule-based vs LLM-advised on {args.worlds} paired "
+          f"worlds (seeds {args.first_seed}+), {args.ticks} ticks, "
+          f"advice every {args.advice_interval} ticks...")
+    results = compare_llm_vs_baseline(
+        num_worlds=args.worlds,
+        first_seed=args.first_seed,
+        ticks=args.ticks,
+        size=args.size,
+        num_settlements=args.settlements,
+        disaster_mult=disaster_mult,
+        gather_mult=gather_mult,
+        client=client,
+        advice_interval_ticks=args.advice_interval,
+    )
+
+    verdict = verdict_text(results)
+    advice = results["advice"]
+    print(f"\nValidated LLM actions: {advice['validated_llm_actions']} "
+          f"(failures: {advice['advice_failures']})")
+    print("Metric summary:")
+    for name, m in results["metrics"].items():
+        p_str = str(m["wilcoxon_p"]) if m["wilcoxon_p"] is not None else "n/a"
+        print(f"  {name:22s} base={m['baseline_mean']:>8} "
+              f"llm={m['policy_mean']:>8} delta={m['delta']:+} p={p_str}")
+    print(f"\nVERDICT: {verdict}")
+
+    md_path = generate_report(
+        results, args.report, None if args.chart == "" else args.chart)
+    print(f"report written to {md_path}")
+
+    store = WorldStore()
+    run_id = store.insert_training_run({
+        "policy_generation_a": "llm",
+        "policy_generation_b": "rulebased",
+        "eval_seed_base": args.first_seed,
+        "worlds": args.worlds,
+        "wins_a": results["policy_wins"],
+        "ties": results["ties"],
+        "win_fraction": results["win_fraction_strict"],
+        "mean_survival_a": results["mean_policy_survival"],
+        "mean_survival_b": results["mean_baseline_survival"],
+        "agent_type": "llm_advised_vs_rulebased",
+        "results_json": json.dumps({
+            **results, "verdict": verdict}),
+    })
+    print(f"recorded in training_runs (id={run_id})")
+    return 0
 
 
 def main(argv: list[str] | None = None) -> int:
