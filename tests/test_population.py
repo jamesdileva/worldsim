@@ -261,3 +261,53 @@ def test_strategy_shift_report_returns_distributions(tmp_path):
                 "agricultural", "mining", "trading", "military",
                 "balanced", "settling",
             }
+
+# ----------------------------------------------------------------------
+# Sprint 21: cross-generation learning
+# ----------------------------------------------------------------------
+
+def test_merge_strategy_memories_later_generation_weighs_more():
+    from worldsim.population import merge_strategy_memories
+
+    m1 = {("trading", 30): 0.5}
+    m2 = {("trading", 30): -0.5}
+    merged_even = merge_strategy_memories([m1])
+    assert merged_even[("trading", 30)] == pytest.approx(0.5)
+    merged = merge_strategy_memories([m1, m2], ema_alpha=0.3)
+    # 0.5 * 0.7 + (-0.5) * 0.3 = 0.2
+    assert merged[("trading", 30)] == pytest.approx(0.2)
+
+
+def test_strategy_prior_round_trip(tmp_path):
+    from worldsim.population import (
+        load_strategy_prior,
+        save_strategy_prior,
+    )
+
+    prior = {("mining", 2): 1.25, ("trading", 30): -0.4}
+    path = save_strategy_prior(prior, tmp_path / "priors.json")
+    loaded = load_strategy_prior(path)
+    assert loaded == prior
+
+
+def test_prior_actions_for_orders_by_ema():
+    from worldsim.population import prior_actions_for
+
+    prior = {
+        ("mining", 99): 0.1,
+        ("mining", 2): 1.5,
+        ("mining", 7): 0.8,
+        ("trading", 30): 2.0,   # different archetype: excluded
+    }
+    top = prior_actions_for("mining", prior, top_k=2)
+    assert top == [2, 7]
+
+
+def test_curriculum_failure_seeds_selected():
+    """Below-mean champion seed scores become next-gen curriculum seeds."""
+    sim_scores = {"9000": 10.0, "9001": 2.0, "9002": 12.0}
+    mean_score = sum(sim_scores.values()) / len(sim_scores)
+    failures = sorted(
+        int(s) for s, v in sim_scores.items() if v < mean_score
+    )
+    assert failures == [9001]

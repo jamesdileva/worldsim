@@ -65,6 +65,7 @@ class WorldSimEnv(gym.Env):
         disaster_chance_mult: float = 1.0,
         gather_mult: float = 1.0,
         reward_weights: dict | None = None,
+        strategy_prior: dict | None = None,
     ) -> None:
         super().__init__()
         self.seed_value = seed
@@ -76,6 +77,9 @@ class WorldSimEnv(gym.Env):
         # Sprint 18b: configurable §6.4 weights (shaping rebalance without
         # code edits).
         self.reward_weights = RewardWeights(**(reward_weights or {}))
+        # Sprint 21: population-level strategy prior consumed by rule-based
+        # agents (idle fallback prefers historically-rewarded actions).
+        self.strategy_prior_data = dict(strategy_prior or {})
 
         self.action_space = gym.spaces.Discrete(NUM_ACTIONS)
         self.observation_space = gym.spaces.Box(
@@ -104,6 +108,13 @@ class WorldSimEnv(gym.Env):
             gather_mult=self.gather_mult,
         )
         sim.spawn_settlements(count=self.num_settlements)
+        if self.strategy_prior_data:
+            for agent in sim.agents:
+                if agent is not None:
+                    agent.strategy_prior = self.strategy_prior_data
+                    if hasattr(agent, "observe"):
+                        # refresh cached prior top-actions on next observe
+                        agent._prior_top_actions = []
         self.sim = sim
         self.controlled = sim.settlements[0]
 

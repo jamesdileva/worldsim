@@ -280,6 +280,7 @@ def train(
     n_steps: int = 512,
     verbose: int = 0,
     n_envs: int = 1,
+    strategy_prior: dict | None = None,
 ) -> dict:
     """Train PPO via model.learn(). Saves checkpoint to save_path (SB3
     appends .zip). Returns metrics summary.
@@ -293,7 +294,7 @@ def train(
     from .env import WorldSimEnv
 
     env_kwargs = dict(size=size, num_settlements=num_settlements,
-                      max_ticks=max_ticks)
+                      max_ticks=max_ticks, strategy_prior=strategy_prior)
     if n_envs > 1:
         from stable_baselines3.common.env_util import make_vec_env
         from stable_baselines3.common.vec_env import SubprocVecEnv

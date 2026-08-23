@@ -209,6 +209,10 @@ class RuleBasedAgent(Agent):
         self._tick: int | None = None
         self._personality: dict[str, float] = {}
         self.last_action: int = int(Action.IDLE)
+        # Sprint 21: population-level strategy prior (archetype -> top
+        # historically-rewarded action IDs). Empty by default.
+        self.strategy_prior: dict = {}
+        self._prior_top_actions: list[int] = []
 
     def observe(self, sim, settlement: Settlement) -> np.ndarray:
         # Sync cadence counter from the world clock (resume-safe).
@@ -221,6 +225,15 @@ class RuleBasedAgent(Agent):
             "aggression": 0.5,
             "archetype": "balanced",
         }
+        archetype = self._personality.get("archetype", "balanced")
+        if self.strategy_prior:
+            from .population import prior_actions_for
+
+            self._prior_top_actions = prior_actions_for(
+                archetype, self.strategy_prior
+            )
+        else:
+            self._prior_top_actions = []
         return observe_vector(sim, settlement)
 
     def decide(self, obs: np.ndarray) -> int:
@@ -406,6 +419,20 @@ class RuleBasedAgent(Agent):
             )
             if farm_rng.random() < farm_growth_chance:
                 return int(Action.BUILD_FARM)
+
+        # --- Fallback: cross-generation strategy prior (Sprint 21) --------
+        # Idle decisions preferentially pick this archetype's historically
+        # high-reward actions (population-level memory, Sprint 21).
+        if self.strategy_prior:
+            prior_rng = random.Random(
+                (self.seed ^ 0x9F21) + tick * 6151 + self.index * 29
+            )
+            candidates = [
+                a for a in self._prior_top_actions
+                if 0 <= a < 62
+            ]
+            if candidates:
+                return candidates[prior_rng.randrange(len(candidates))]
         return int(Action.WAIT)
 
 

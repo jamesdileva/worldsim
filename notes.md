@@ -5,6 +5,50 @@ Decisions worth remembering are marked **[DECISION]**.
 
 ---
 
+## Session 23 — 2026-08-20 — Sprint 21: Cross-Generation Learning
+
+**What was built**
+- `population.py` —
+  - `merge_strategy_memories()`: EMA-weighted merge of per-generation
+    {(archetype, action): reward} tables (later generations weigh more)
+  - `save/load_strategy_prior()`: population prior persisted as JSON next
+    to checkpoints
+  - `prior_actions_for(archetype)`: top-k historically-rewarded actions
+  - `evolve()` curriculum: champion scored across an evaluation seed set;
+    below-mean seeds become the NEXT generation's fresh-candidate training
+    worlds (`curriculum_failure_seeds`, recorded per generation)
+- `agents.py` — RuleBasedAgent consumes the prior: idle-fallback decisions
+  preferentially pick prior top-actions (deterministic seeded rng; lazy
+  import avoids agents→population cycle); env threads priors to all
+  rule-based agents at reset
+- CLI — `rl evolve --curriculum/--no-curriculum --eval-seeds N
+  --strategy-priors PATH`
+- Tests: 5 new (merge weighting, prior round-trip, ordering, fallback
+  behavior, failure-seed selection). Fast suite: 264 passing.
+
+### Decisions
+
+- **[DECISION] Priors consumed by rule-based agents' idle fallback** — the
+  only decision path that's freely choosable without breaking urgency logic.
+  Deterministic seeded rng keeps the stateless/resumable property intact.
+- **[DECISION] Curriculum = training worlds, not reward changes**: candidates
+  for gen N+1 train ON the seeds where gen N's champion scored below its own
+  mean. Failure definition is relative to the champion's average (adaptive).
+- **[DECISION] Lazy import of population inside agents.observe** — avoids
+  the agents→population→training→env→agents import cycle.
+
+### Findings
+
+Curriculum mechanism verified structurally (failure selection + candidate
+world override). Smoke runs on tiny 32-tile worlds produced identical
+champion seed-scores across eval seeds — diagnosed as saturation again:
+best-spawn search finds all-fertile squares on tiny maps, making dynamics
+seed-independent. Score variance (and thus meaningful curricula) returns at
+256-size benchmark worlds. Regression-reduction measurement deferred until
+Phase 4 evolution runs at full scale.
+
+---
+
 ## Session 22 — 2026-08-20 — Sprint 20: Selection, Mutation & Strategy Evolution
 
 **What was built**

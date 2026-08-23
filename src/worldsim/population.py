@@ -8,11 +8,63 @@ label so downstream tools (`rl dashboard`, `rl compare`) keep working.
 
 from __future__ import annotations
 
+import json
 import shutil
 import time
 from pathlib import Path
 
 from .training import POLICIES_DIR, file_sha256, register_checkpoint, train
+
+STRATEGY_PRIOR_PATH = POLICIES_DIR / "strategy_priors.json"
+
+
+# ---------------------------------------------------------------------------
+# Strategy-memory aggregation (Sprint 21)
+# ---------------------------------------------------------------------------
+
+def merge_strategy_memories(memories: list[dict],
+                            ema_alpha: float = 0.3) -> dict[tuple, float]:
+    """Merge multiple {(archetype, action): ema} tables into one prior.
+
+    Later generations weigh more (each table applied with EMA weight)."""
+    merged: dict[tuple, float] = {}
+    for mem in memories:
+        for key, value in mem.items():
+            merged[key] = (
+                value if key not in merged
+                else merged[key] * (1 - ema_alpha) + value * ema_alpha
+            )
+    return merged
+
+
+def save_strategy_prior(prior: dict, path: str | Path = STRATEGY_PRIOR_PATH) -> Path:
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = [
+        {"archetype": arch, "action": action, "ema": value}
+        for (arch, action), value in prior.items()
+    ]
+    path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    return path
+
+
+def load_strategy_prior(path: str | Path = STRATEGY_PRIOR_PATH) -> dict:
+    path = Path(path)
+    if not path.exists():
+        return {}
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    return {
+        (obj["archetype"], int(obj["action"])): obj["ema"]
+        for obj in payload
+    }
+
+
+def prior_actions_for(archetype: str, prior: dict, top_k: int = 5):
+    """Top-k action IDs by EMA reward for one archetype."""
+    entries = [(action, ema) for (arch, action), ema in prior.items()
+               if arch == archetype]
+    entries.sort(key=lambda kv: -kv[1])
+    return [action for action, _ in entries[:top_k]]
 
 
 def mutate_checkpoint(model_path: str | Path, out_path: str | Path,
@@ -211,8 +263,13 @@ def evolve(
     max_ticks: int = 1000,
     n_envs: int = 1,
     eval_ticks: int = 300,
+    eval_seed_base: int = 9000,
+    eval_seed_count: int = 3,
+    curriculum: bool = True,
+    strategy_prior_path: str | Path | None = STRATEGY_PRIOR_PATH,
 ) -> dict:
-    """Evolutionary loop (Sprint 20): each generation after the first gets
+    """Evolutionary loop (Sprint 20/21): each generation after the first
+    gets
 
     - the previous champion unchanged (**elitism**),
     - ``n_mutants`` Gaussian-noise children of the champion (scored by
@@ -220,16 +277,47 @@ def evolve(
     - ``population_size`` freshly-trained random candidates.
 
     The highest-scoring candidate becomes the generation champion.
-    Lineage (parent + mutation type) recorded per candidate."""
+
+    Sprint 21 additions:
+    - **Curriculum**: after each generation the champion is scored across an
+      evaluation seed set; seeds scoring below the champion's own mean are
+      marked failures and become the NEXT generation's fresh-candidate
+      training worlds (failure-weighted curriculum).
+    - **Strategy priors**: when a prior file exists, agents bias idle
+      fallback decisions toward historically high-reward actions."""
     store = _open_store()
     history = []
     prev_champion: dict | None = None
+    curriculum_failure_seeds: list[int] = []
     try:
+        strategy_prior = (
+            load_strategy_prior(strategy_prior_path)
+            if strategy_prior_path else {}
+        )
+        if strategy_prior:
+            print(
+                f"[evolve] loaded strategy prior "
+                f"({len(strategy_prior)} entries)"
+            )
+        eval_seeds = [
+            eval_seed_base + i for i in range(max(eval_seed_count, 1))
+        ]
         for g in range(1, generations + 1):
             gen = f"gen{g}"
             print(f"[evolve] generation {gen}...")
             candidates: list[dict] = []
             started = time.time()
+
+            # Curriculum: failing seeds become fresh-candidate worlds.
+            if curriculum and curriculum_failure_seeds:
+                print(
+                    f"[evolve] curriculum: prioritizing failure seeds "
+                    f"{curriculum_failure_seeds}"
+                )
+            def _candidate_world_seed(i: int) -> int:
+                if curriculum and curriculum_failure_seeds:
+                    return curriculum_failure_seeds[i % len(curriculum_failure_seeds)]
+                return seed_base + g * 9973 + i * 101
 
             if prev_champion is not None:
                 # --- Elitism: champion survives unchanged ----------------
@@ -285,7 +373,7 @@ def evolve(
             # --- Fresh random candidates ---------------------------------
             for i in range(population_size):
                 label = f"{gen}_c{i}"
-                seed = seed_base + g * 9973 + i * 101
+                seed = _candidate_world_seed(i)
                 summary = train(
                     total_timesteps=timesteps_per_candidate,
                     seed=seed,
@@ -295,6 +383,7 @@ def evolve(
                     save_path=POLICIES_DIR / f"policy_{label}",
                     log_path=POLICIES_DIR / f"{gen}_candidates.jsonl",
                     n_envs=n_envs,
+                    strategy_prior=strategy_prior if strategy_prior else None,
                 )
                 register_checkpoint(
                     store, label, POLICIES_DIR / f"policy_{label}", summary,
@@ -306,6 +395,10 @@ def evolve(
                     "score": summary["mean_return"],
                     "origin": "fresh",
                     "parent": None,
+                    "curriculum_world": (
+                        seed if curriculum and curriculum_failure_seeds
+                        else None
+                    ),
                 })
 
             champion = select_champion(candidates)
@@ -317,12 +410,31 @@ def evolve(
             }, parent_generation=(
                 prev_champion["label"] if prev_champion else None
             ))
+
+            # Sprint 21 curriculum: score the champion across the evaluation
+            # seed set; below-mean seeds become next generation's worlds.
+            champion_path = POLICIES_DIR / f"policy_{gen}.zip"
+            seed_scores = {
+                s: quick_eval(champion_path, ticks=eval_ticks, size=size,
+                              num_settlements=num_settlements, seed=s)
+                for s in eval_seeds
+            }
+            mean_score = sum(seed_scores.values()) / len(seed_scores)
+            if curriculum:
+                curriculum_failure_seeds = sorted(
+                    s for s, v in seed_scores.items() if v < mean_score
+                )
+            else:
+                curriculum_failure_seeds = []
+
             entry = {
                 "generation": gen,
                 "champion": champion["label"],
                 "champion_score": champion["score"],
                 "champion_origin": champion.get("origin"),
                 "parent": prev_champion["label"] if prev_champion else None,
+                "seed_scores": {str(k): v for k, v in seed_scores.items()},
+                "curriculum_failure_seeds": list(curriculum_failure_seeds),
                 "candidates": sorted(
                     candidates, key=lambda c: -c["score"]
                 ),

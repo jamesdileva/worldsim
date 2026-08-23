@@ -276,6 +276,25 @@ def build_parser() -> argparse.ArgumentParser:
     evo.add_argument("--max-ticks", type=int, default=500)
     evo.add_argument("--parallel", type=int, default=1,
                      help="Workers per candidate training run")
+    evo.add_argument(
+        "--curriculum", dest="curriculum", action="store_true",
+        default=True,
+        help="Weight next generation's candidate worlds toward seeds the "
+             "champion scored below its own mean (Sprint 21)",
+    )
+    evo.add_argument(
+        "--no-curriculum", dest="curriculum", action="store_false",
+        help="Disable failure-weighted curricula",
+    )
+    evo.add_argument(
+        "--eval-seeds", type=int, default=3,
+        help="Evaluation seed-set size used for champion scoring",
+    )
+    evo.add_argument(
+        "--strategy-priors", default=None,
+        help="Path to a strategy_priors.json (default: standard policies "
+             "dir path; missing file = no priors)",
+    )
     return parser
 
 
@@ -1013,6 +1032,10 @@ def _cmd_rl_evolve(args: argparse.Namespace) -> int:
         max_ticks=args.max_ticks,
         n_envs=args.parallel,
         eval_ticks=args.eval_ticks,
+        eval_seed_base=9000,
+        eval_seed_count=args.eval_seeds,
+        curriculum=args.curriculum,
+        strategy_prior_path=args.strategy_priors,
     )
     print("\nEvolution summary:")
     for gen_result in results["generations"]:
