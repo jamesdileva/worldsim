@@ -18,14 +18,13 @@ Phase 3); economies, trade, war, diplomacy, reputation, disasters, ruins,
 emergent strategies — all reproducible from a single seed.
 
 **Stack:** Python + NumPy + opensimplex + SQLite + Gymnasium +
-Stable-Baselines3 (PPO) + matplotlib + psutil + scipy.
+Stable-Baselines3 (PPO) + matplotlib + psutil + scipy + Ollama
+(stdlib-urllib client, Phase 5).
 
 **Status:** Phase 1 ✅, Phase 2 ✅, Phase 3 ✅ (Sprints 12–18 + remediation;
-learning healthy in training metrics, eval metrics saturated), **Phase 4 ✅
-COMPLETE** (S19 populations, S20 mutation/elitism, S21 cross-generation
-learning, S22 self-play, S23 strategy discovery — two novel road-centric
-strategies found, S24 anti-hacking defense ladder; sprint docs expanded
-through Phase 10). Next: Phase 5 (AI Reasoning) scoping.
+learning healthy in training metrics, eval metrics saturated), **Phase 5 in
+progress** (Phase 4 ✅ COMPLETE: S19–24; S25 Ollama integration done; sprint
+docs expanded through Phase 10).
 
 **Test tiers:** `pytest` = fast suite (~250 tests, ~3–5 min);
 `pytest -m slow` = long integration runs.
@@ -63,6 +62,7 @@ through Phase 10). Next: Phase 5 (AI Reasoning) scoping.
 | `fafb008` | 22 | Multi-controller self-play, head-to-head competition, competitive shares/metrics |
 | `bca94ed` | 23 | Behavioral signatures, k-means strategy discovery, novelty detection, discovery log with exemplars |
 | `847624a` | 24 | RewardGuard ladder (WARN/PENALIZE/QUARANTINE), selection quarantine, exploit regression suite (**Phase 4 complete**) |
+| `43297e8` | 25 | Ollama integration: zero-dep urllib client, graceful degradation, config precedence, llm status/ask CLI (**Phase 5 begins**) |
 
 ---
 
@@ -272,6 +272,26 @@ Agents replace auto-rules; the frozen RL contract is born
 - **[WHY] Quarantine excludes from selection only**: registered checkpoints
   keep forensic value; evolution limps forward if all candidates are
   quarantined rather than crashing.
+
+### Session 27 — Sprint 25 (this session)
+- Phase 5 docs expanded: Sprints 25–30 carry full tasks/acceptance criteria
+  grounded in roadmap §19 principles (LLM = advisory, never physics; never
+  secretly mutates state; graceful degradation everywhere).
+- `llm.py`: zero-dependency stdlib-urllib Ollama client; every method
+  returns `LLMResult` and never raises into sim/training code; timeouts,
+  unreachable servers, malformed JSON, and POST redirects all handled.
+- CLI: `llm status` (reachability/models/config echo, warns if configured
+  model missing) + `llm ask` for manual probing. Tests fully mocked; live
+  test auto-skips without a server.
+- **[WHY] Default host 127.0.0.1 not localhost**: avoids IPv6-first
+  resolution quirks against Ollama's loopback listener (live-found: urllib
+  surfaced an unhandled 307 "Temporary Redirect" via localhost).
+- **[WHY] Redirects followed once manually preserving method+payload**:
+  urllib will not re-POST on 307/308 by itself.
+- **[WHY] Default timeout raised 30s→180s**: first call may load the model
+  from disk on modest hardware (observed ~36s for llama3.1:8b).
+- Config precedence: CLI flags > llm_config.json > defaults; corrupt config
+  degrades to defaults.
 
 ---
 
