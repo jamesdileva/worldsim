@@ -23,9 +23,9 @@ Stable-Baselines3 (PPO) + matplotlib + psutil + scipy + Ollama
 
 **Status:** Phase 1 ✅, Phase 2 ✅, Phase 3 ✅ (Sprints 12–18 + remediation;
 learning healthy in training metrics, eval metrics saturated), **Phase 5 in
-progress** (Phase 4 ✅ COMPLETE: S19–24; S25 Ollama, S26 summarization, S27
-strategic reasoning, S28 intent→validated-action agent done; sprint docs
-expanded through Phase 10).
+progress** (Phase 4 ✅ COMPLETE: S19–24; S25–29 done — Ollama,
+summarization, strategic reasoning, intent→validated-action agent,
+scheduled background reasoning; sprint docs expanded through Phase 10).
 
 **Test tiers:** `pytest` = fast suite (~250 tests, ~3–5 min);
 `pytest -m slow` = long integration runs.
@@ -67,6 +67,7 @@ expanded through Phase 10).
 | `045ac39` | 26 | Settlement/world state summarization: deterministic token-budgeted tiny/full prompt views |
 | `86cec92` | 27 | Strategic reasoning: JSON advice prompts + strict parser, never-raise advise(), advisory log |
 | `0e30601` | 28 | Intent mapping onto frozen action space, pre-tick validation layer, LLMDrivenAgent with rule fallback |
+| `d740c70` | 29 | Reasoning scheduler (interval/event/struggling), single-flight background advisor, non-blocking sim loop |
 
 ---
 
@@ -356,6 +357,29 @@ Agents replace auto-rules; the frozen RL contract is born
   request and execution — a queued farm can go unaffordable.
 - **[WHY] Two independent legality layers**: validate_action pre-tick
   AND the sim handler's own checks — no LLM output can break world rules.
+
+### Session 31 — Sprint 29 (this session)
+- `reasoning.py`: `ReasoningConfig` with three combinable trigger modes —
+  interval (every N ticks), event-triggered (raid/war/disaster/collapse/
+  peace since last advice), struggling-only gate; `struggle_score()`
+  (starvation dominates; dead=inf) + worst-first `prioritize()`;
+  `BackgroundAdvisor` daemon thread enforcing AT MOST ONE in-flight LLM
+  call per world, submit non-blocking, poll-based consumption.
+- LLMDrivenAgent gained `advisor=`/`config=`: scheduler-gated background
+  requests replace the S28 sync path when set.
+- Live: 50 ticks in 0.1s wall while real llama3.1:8b calls ran in
+  background; manual-cycle run consumed a completed advice and executed
+  validated BUILD_GRANARY. Fast suite: 381 passing.
+- **[DECISION] One in-flight call per world**: protecting local inference
+  throughput; global slot keeps queueing predictable and lets prioritize()
+  starve nobody.
+- **[DECISION] Poll not push**: results keyed by settlement id, consumed
+  at the agent's own observe() — no callbacks mutate sim state mid-tick.
+- **[DECISION] last_reasoned_tick updates on CONSUMED results only**:
+  re-submitting while in flight is wasted latency; failures retry after
+  the interval naturally.
+- Bug found by tests: tick-0 events invisible to event mode (floor=0);
+  fixed with floor=-1 sentinel.
 
 ---
 
