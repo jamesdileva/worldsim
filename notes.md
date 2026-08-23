@@ -5,6 +5,46 @@ Decisions worth remembering are marked **[DECISION]**.
 
 ---
 
+## Session 28 — 2026-08-22 — Sprint 26: Settlement State Summarization
+
+**What was built**
+- `summaries.py` — deterministic prompt-ready text views of sim state:
+  - `summarize_settlement(sim, s, tier)` — tiny (one line) and full
+    (sections: stats/resources/buildings/territory/queue/relations/events)
+  - `summarize_world(sim, tier)` — header + wars/disasters/routes +
+    per-settlement summaries
+  - `estimate_tokens()` (~4 chars/token) for budget checks
+- Tiny one-liner packs archetype, strategy label, pop/food/net/happiness,
+  territory, building mix F/S/M/G, hostile/allies/WAR names — the Sprint 27
+  reasoning prompts' primary input.
+- 15 new tests: exact format pins on a duck-typed stub sim, determinism
+  (byte-identical within and across identical seeded sims), placeholder
+  rendering (dead settlements, empty personality, None numerics), token
+  budgets. Fast suite: 309 passing.
+
+### Decisions
+
+- **[DECISION] Names not IDs in output**: settlement ids are opaque; LLM
+  prompts need readable names, and omitting ids sidesteps any uuid4
+  leakage into "deterministic" output.
+- **[DECISION] Stub-based format pins**: pinning exact strings against a
+  real sim would couple tests to world dynamics; the stub pins formats,
+  real-sim tests pin determinism/budgets.
+- **[DECISION] Round-half-even is fine in pins**: `format(120.5, '.0f')`
+  → "120" bit us once; pins now encode actual Python semantics rather
+  than fighting them.
+- **[DECISION] Wars/disasters/routes at world level only**: per-settlement
+  war state already appears in relations lines; no duplication.
+
+### Verification
+
+```
+Live 60-tick world: tiny + full tiers render correct relations (alliances
+formed via trade), events chronological, buildings/territory accurate.
+```
+
+---
+
 ## Session 27 — 2026-08-20 — Sprint 25: Ollama Integration (Phase 5 begins)
 
 **What was built**
