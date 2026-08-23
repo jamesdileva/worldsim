@@ -22,8 +22,9 @@ Stable-Baselines3 (PPO) + matplotlib + psutil + scipy.
 
 **Status:** Phase 1 ✅, Phase 2 ✅, Phase 3 ✅ (Sprints 12–18 + remediation;
 learning healthy in training metrics, eval metrics saturated), **Phase 4 in
-progress** (Sprint 19 done: populations + generational training; sprint docs
-expanded through Phase 10).
+progress** (Sprint 19 done: populations + generational training; Sprint 20
+done: mutation + elitism + lineage types + strategy-shift report; sprint
+docs expanded through Phase 10).
 
 **Test tiers:** `pytest` = fast suite (~250 tests, ~3–5 min);
 `pytest -m slow` = long integration runs.
@@ -56,6 +57,7 @@ expanded through Phase 10).
 | `ab780ec` | 18 | Multi-generation dashboard, learning curves, per-seed regression detection |
 | `44e34d1` | 18b | Learning remediation: entropy capture fix, configurable reward weights, controlled retraining (no regressions) |
 | `0a9f070` | 19 | Population manager, champion selection/promotion, lineage; sprint docs expanded through Phase 10 (**Phase 4 begins**) |
+| `aa0bd9d` | 20 | Weight mutation, elitism, mutant scoring via rollouts, lineage types, strategy-shift report |
 
 ---
 
@@ -175,6 +177,23 @@ Agents replace auto-rules; the frozen RL contract is born
 - **[WHY] Selection on training return for now**: validation-world selection
   deferred to Sprint 20; training return is free (no extra rollouts).
 - Verified end-to-end: gen1→gen2 champion chain with parent lineage.
+
+### Session 22 — Sprint 20 (this session)
+- `mutate_checkpoint()`: Gaussian noise per-tensor scaled by param std —
+  large-weight layers aren't destabilized; children load with identical
+  topology.
+- Evolution v2: each generation = **elite** (champion unchanged) + **n
+  Gaussian mutants** (scored by cheap rollouts, no gradient cost) + fresh
+  trained candidates; selection across all three.
+- **[WHY] Mutants scored by rollout not training**: evolutionary pressure
+  without gradient expense; fresh candidates keep training-return scoring.
+- **[WHY] Elite wins score ties**: elitism must be able to protect the
+  champion against equal-scoring challengers.
+- Parent lineage now points at exact champion checkpoint labels (full chains
+  queryable); `mutation` column records elite/fresh/gaussian:<strength>.
+- `strategy_shift_report()`: per-generation settlement label distributions —
+  first view of how behavior mix evolves under evolutionary pressure.
+- Verified live: gen2's elite won its tie vs a mutant (0.8113).
 
 ---
 
