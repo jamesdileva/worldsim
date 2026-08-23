@@ -23,8 +23,8 @@ Stable-Baselines3 (PPO) + matplotlib + psutil + scipy + Ollama
 
 **Status:** Phase 1 ✅, Phase 2 ✅, Phase 3 ✅ (Sprints 12–18 + remediation;
 learning healthy in training metrics, eval metrics saturated), **Phase 5 in
-progress** (Phase 4 ✅ COMPLETE: S19–24; S25 Ollama integration done; sprint
-docs expanded through Phase 10).
+progress** (Phase 4 ✅ COMPLETE: S19–24; S25 Ollama integration done; S26
+state summarization done; sprint docs expanded through Phase 10).
 
 **Test tiers:** `pytest` = fast suite (~250 tests, ~3–5 min);
 `pytest -m slow` = long integration runs.
@@ -63,6 +63,7 @@ docs expanded through Phase 10).
 | `bca94ed` | 23 | Behavioral signatures, k-means strategy discovery, novelty detection, discovery log with exemplars |
 | `847624a` | 24 | RewardGuard ladder (WARN/PENALIZE/QUARANTINE), selection quarantine, exploit regression suite (**Phase 4 complete**) |
 | `43297e8` | 25 | Ollama integration: zero-dep urllib client, graceful degradation, config precedence, llm status/ask CLI (**Phase 5 begins**) |
+| `045ac39` | 26 | Settlement/world state summarization: deterministic token-budgeted tiny/full prompt views |
 
 ---
 
@@ -292,6 +293,24 @@ Agents replace auto-rules; the frozen RL contract is born
   from disk on modest hardware (observed ~36s for llama3.1:8b).
 - Config precedence: CLI flags > llm_config.json > defaults; corrupt config
   degrades to defaults.
+
+### Session 28 — Sprint 26 (this session)
+- `summaries.py`: deterministic settlement/world text views for LLM
+  prompts — tiny (one line per settlement) and full (sections) tiers;
+  `summarize_world` adds header + wars/disasters/routes + per-settlement
+  lines; `estimate_tokens` (~4 chars/token) for budget checks.
+- Tiny one-liner packs archetype/strategy/pop/food/net/happiness/
+  territory/building mix + hostile/allies/WAR names — Sprint 27 prompts'
+  primary input.
+- 15 new tests: exact format pins on a duck-typed stub sim, byte-identical
+  determinism within and across identical seeded sims, placeholder
+  rendering (dead settlements, empty personality, None numerics), budgets.
+  Fast suite: 309 passing.
+- **[WHY] Names not IDs in output**: ids are opaque to an LLM and uuid4
+  leakage would break the "pure function of state" contract; readable
+  names only.
+- **[WHY] Stub-based format pins**: pins against a live sim would couple
+  tests to world dynamics — stubs pin formats, real sims pin determinism.
 
 ---
 
