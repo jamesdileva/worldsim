@@ -23,8 +23,8 @@ Stable-Baselines3 (PPO) + matplotlib + psutil + scipy.
 **Status:** Phase 1 ✅, Phase 2 ✅, Phase 3 ✅ (Sprints 12–18 + remediation;
 learning healthy in training metrics, eval metrics saturated), **Phase 4 in
 progress** (S19 populations, S20 mutation/elitism, S21 cross-generation
-learning, S22 self-play head-to-head done; sprint docs expanded through
-Phase 10).
+learning, S22 self-play head-to-head, S23 strategy discovery done; sprint
+docs expanded through Phase 10).
 
 **Test tiers:** `pytest` = fast suite (~250 tests, ~3–5 min);
 `pytest -m slow` = long integration runs.
@@ -60,6 +60,7 @@ Phase 10).
 | `aa0bd9d` | 20 | Weight mutation, elitism, mutant scoring via rollouts, lineage types, strategy-shift report |
 | `ed3b232` | 21 | Strategy-memory aggregation into population priors, failure-weighted curricula |
 | `fafb008` | 22 | Multi-controller self-play, head-to-head competition, competitive shares/metrics |
+| `bca94ed` | 23 | Behavioral signatures, k-means strategy discovery, novelty detection, discovery log with exemplars |
 
 ---
 
@@ -233,6 +234,25 @@ Agents replace auto-rules; the frozen RL contract is born
   (~1.5 reward for same-model sanity runs).
 - **[WHY] Shares across controllers only**: bystander rule-based settlements
   excluded from denominators so shares measure competitive balance.
+
+### Session 25 — Sprint 23 (this session)
+- `discovery.py`: 6-dim normalized behavioral signatures (building shares +
+  capped route/raid/road activity); scipy k-means++ clustering across
+  generation champions' probe-world rollouts; novelty = centroid distance
+  beyond threshold from EVERY archetype reference centroid; discovery log
+  persists named strategies with exemplars (checkpoint + seed).
+- **Live finding**: two [NOVEL] road-centric strategies discovered in gen1r/
+  gen3r rollouts — road-heavy play nobody scripted, exactly the roadmap's
+  "I never programmed this" success criterion.
+- **[WHY] Signatures use shares + activity caps**: raw counts made farm-
+  heavy mixes indistinguishable (Sprint 11 lesson); shares separate
+  composition, capped dims separate intensity.
+- **[WHY] Novelty = distance from all archetypes, not cluster sparsity**:
+  flags genuinely uncharted behavior rather than just small clusters.
+- Weak supervision: member label majority votes reported alongside dominant-
+  feature names so discovered clusters stay grounded in known vocabulary.
+- Dashboard/graphics status confirmed: CLI analytics + matplotlib PNGs only;
+  interactive UIs deliberately deferred to Phase 8 (Sprints 44–50).
 
 ---
 
