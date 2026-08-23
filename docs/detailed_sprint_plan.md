@@ -589,16 +589,144 @@ champion via parameter-space mutation, plus strategy-level evolution.
 ## Phase 5: AI Reasoning (Sprints 25–30)
 **Goal:** Optional Ollama-backed strategic reasoning layered ON TOP of ML —
 LLMs advise; deterministic simulation and validated actions remain law.
-*Detailed scoping happens when Phase 4 completes.*
 
-| Sprint | Theme | Notes |
-|---|---|---|
-| 25 | Ollama integration | Local server client, health/timeouts, model config |
-| 26 | Settlement state summarization | Compact world/settlement summaries for prompts |
-| 27 | Strategic reasoning | Advice generation from summaries |
-| 28 | LLM → agent intent → validated actions | Advice maps onto the frozen 62-action space; validation mandatory |
-| 29 | Periodic AI reasoning | Budget-aware scheduling (every N ticks / events) |
-| 30 | ML-only vs ML + LLM comparison | Paired benchmark methodology reused |
+**Phase principles (roadmap §19):**
+- LLMs are optional strategic reasoning, never the physics engine.
+- The LLM may never secretly modify simulation state (roadmap §23.5).
+- Inference is O(slow) — strategic reasoning only, never per-decision.
+- Responsibility split: deterministic rules → mechanics; ML → learned
+  policy; LLM → advisory intent (validated in S28); user → God Mode.
+- Every LLM touchpoint degrades gracefully: the simulation and all training/
+  benchmark paths never block or crash on LLM unavailability.
+
+---
+
+### Sprint 25 — Ollama Integration
+
+**Duration:** 1 week
+**Deliverable:** A zero-dependency Ollama client with graceful degradation,
+config file + CLI flag overrides, availability probing, and manual prompt
+tooling.
+
+**Tasks:**
+- `llm.py` — `LLMConfig` dataclass (host, model, temperature, timeout_s,
+  num_predict) loaded from `data/world_sim/llm_config.json`; CLI flags
+  override file values
+- `OllamaClient`: `generate(prompt)` / `chat(messages)` against
+  `POST /api/generate` and `/api/chat`; `is_available()` health probe via
+  `GET /api/tags`; `list_models()`
+- Graceful-degradation contract: every method returns an `LLMResult`
+  (`ok`, `text`, `error`, `elapsed_s`) — never raises into sim/training code
+- stdlib `urllib.request` client (zero new dependencies)
+- CLI: `worldsim llm status` (server reachability, installed models,
+  config echo), `worldsim llm ask --prompt "..."` for manual probing
+
+**Acceptance criteria:**
+- `llm status` reports server state + models against a running Ollama
+- `llm ask` returns real model output end-to-end
+- Unavailable-server case degrades to a clean error result (no traceback)
+- Config precedence: flags > JSON file > defaults (unit-tested)
+- All tests pass without Ollama installed (mocked HTTP)
+
+---
+
+### Sprint 26 — Settlement State Summarization
+
+**Duration:** 1 week
+**Deliverable:** Compact, token-budgeted world/settlement summaries suitable
+for LLM prompts.
+
+**Tasks:**
+- `summaries.py`: settlement summary builder (population, food, buildings
+  by type, territory, relations, recent events, strategy label) at multiple
+  verbosity tiers (tiny ≤200 tokens / full)
+- World summary: top-level stats + per-settlement one-liners
+- Deterministic formatting (same state → byte-identical summary; pure
+  function of `(state, tick)`)
+- Unit tests pinning exact formats
+
+**Acceptance criteria:**
+- Summary fits stated token budget on tiny worlds
+- Byte-identical across runs for identical states
+- Missing/None fields render as explicit placeholders, never crash
+
+---
+
+### Sprint 27 — Strategic Reasoning
+
+**Duration:** 1 week
+**Deliverable:** Advice generation: summaries in → structured strategic
+priorities out.
+
+**Tasks:**
+- Prompt templates (system + user) requesting advice in parseable form
+- `advise(settlement_summary)` → parsed advice object (priorities list,
+  rationale); malformed output degrades to "no advice"
+- Advice is advisory-only this sprint: logged + surfaced, never executed
+
+**Acceptance criteria:**
+- Round-trip on live model produces parseable advice for ≥90% of prompts
+  (live-gated test)
+- Malformed/garbage model output never crashes or executes
+
+---
+
+### Sprint 28 — LLM → Agent Intent → Validated Actions
+
+**Duration:** 1–2 weeks
+**Deliverable:** Advice maps onto the frozen 62-action space behind
+mandatory validation.
+
+**Tasks:**
+- Intent schema: advice phrases → candidate action IDs (+ arguments)
+- Validation layer: every candidate checked against affordability, terrain,
+  ownership, cooldowns (reuses existing mechanic validators); invalid
+  intents dropped with telemetry
+- `LLMDrivenAgent`: Agent implementation whose decisions come from LLM
+  intent when available, rule-based fallback otherwise
+
+**Acceptance criteria:**
+- No LLM output can execute an action that violates world rules
+- LLMDrivenAgent survives full episodes with LLM down (pure fallback)
+- Intent→action mapping unit-tested against the frozen action space
+
+---
+
+### Sprint 29 — Periodic AI Reasoning
+
+**Duration:** 1 week
+**Deliverable:** Budget-aware scheduling so slow inference never dominates.
+
+**Tasks:**
+- Scheduler: reason every N ticks / on important events / only for
+  struggling settlements (all three modes configurable)
+- Concurrency guard: at most one in-flight LLM call per world; sim loop
+  never blocks (advice applied next decision cycle)
+
+**Acceptance criteria:**
+- Tick rate unaffected while LLM runs in background
+- Struggling-settlement mode demonstrably targets low-happiness/food
+  settlements first
+
+---
+
+### Sprint 30 — ML-only vs ML + LLM Comparison
+
+**Duration:** 1 week
+**Deliverable:** Paired comparison answering "does advice help?"
+
+**Tasks:**
+- Reuse paired-per-seed methodology: same worlds, ML-only champion vs
+  LLMDrivenAgent variant
+- Metrics: survival, peak population, territory share, reward; significance
+  via existing permutation tests
+- Report generation like Sprint 17
+
+**Acceptance criteria:**
+- Full pipeline runs on ≥10 paired worlds without errors
+- Honest verdict either way, recorded in training_runs
+
+---
 
 ## Phase 6: Civilization Simulation (Sprints 31–37)
 **Goal:** Depth — technology/eras, advanced economies, warfare, long-horizon

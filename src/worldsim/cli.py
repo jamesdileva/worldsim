@@ -318,6 +318,20 @@ def build_parser() -> argparse.ArgumentParser:
         "--novelty-threshold", type=float, default=0.55,
         help="Centroid distance beyond which a cluster counts as novel",
     )
+
+    llm = sub.add_parser("llm", help="Ollama LLM utilities (Phase 5)")
+    llm_sub = llm.add_subparsers(dest="llm_command", required=True)
+    st = llm_sub.add_parser("status", help="Server availability + config")
+    st.add_argument("--config", default=None,
+                    help="Path to llm_config.json")
+    ask = llm_sub.add_parser("ask", help="Send a one-shot prompt")
+    ask.add_argument("--prompt", required=True)
+    ask.add_argument("--model", default=None, help="Override config model")
+    ask.add_argument("--host", default=None, help="Override Ollama host")
+    ask.add_argument("--system", default=None,
+                     help="Optional system prompt")
+    ask.add_argument("--config", default=None,
+                    help="Path to llm_config.json")
     return parser
     return parser
 
@@ -755,8 +769,10 @@ def cmd_rl(args: argparse.Namespace) -> int:
         return _cmd_rl_compare(args)
     if args.rl_command == "dashboard":
         return _cmd_rl_dashboard(args)
-    if args.rl_command == "evolve":
-        return _cmd_rl_evolve(args)
+    if args.rl_command == "discover":
+        return _cmd_rl_discover(args)
+    if args.command == "llm":
+        return _cmd_llm(args)
     if args.rl_command == "discover":
         return _cmd_rl_discover(args)
     print(f"unknown rl command: {args.rl_command}", file=sys.stderr)
@@ -1300,6 +1316,54 @@ def _cmd_rl_run(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_llm(args: argparse.Namespace) -> int:
+    """Sprint 25: Ollama status + manual prompt probing."""
+    from .llm import LLMConfig, OllamaClient
+
+    overrides = {}
+    if getattr(args, "model", None):
+        overrides["model"] = args.model
+    if getattr(args, "host", None):
+        overrides["host"] = args.host
+    config = LLMConfig.load(path=args.config, overrides=overrides)
+    client = OllamaClient(config)
+
+    if args.llm_command == "status":
+        available = client.is_available()
+        print(f"Ollama host     : {config.host}")
+        print(f"Reachable       : {available}")
+        print(f"Config model    : {config.model}")
+        print(f"Timeout         : {config.timeout_s}s")
+        print(f"Temperature     : {config.temperature}")
+        models = client.list_models()
+        if available:
+            print(f"Installed models: {len(models)}")
+            for name in models:
+                marker = "  <- configured" if name == config.model else ""
+                print(f"  {name}{marker}")
+            if models and config.model not in models:
+                print(
+                    f"WARNING: configured model '{config.model}' not "
+                    f"installed"
+                )
+        else:
+            print("Server unreachable — simulation continues unaffected "
+                  "(graceful degradation).")
+        return 0
+
+    if args.llm_command == "ask":
+        result = client.generate(args.prompt, system=args.system)
+        if result.ok:
+            print(result.text)
+            print(f"\n[{result.model}, {result.elapsed_s}s]")
+            return 0
+        print(f"LLM error: {result.error}", file=sys.stderr)
+        return 1
+
+    print(f"unknown llm command: {args.llm_command}", file=sys.stderr)
+    return 2
+
+
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     handlers = {
@@ -1312,6 +1376,7 @@ def main(argv: list[str] | None = None) -> int:
         "events": cmd_events,
         "benchmark": cmd_benchmark,
         "rl": cmd_rl,
+        "llm": cmd_llm,
     }
     return handlers[args.command](args)
 

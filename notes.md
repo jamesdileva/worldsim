@@ -5,6 +5,48 @@ Decisions worth remembering are marked **[DECISION]**.
 
 ---
 
+## Session 27 — 2026-08-20 — Sprint 25: Ollama Integration (Phase 5 begins)
+
+**What was built**
+- Phase 5 docs expanded: `detailed_sprint_plan.md` Sprints 25–30 now carry
+  full tasks/acceptance criteria grounded in roadmap §19 principles
+- `llm.py` — zero-dependency Ollama client over stdlib urllib:
+  - `LLMConfig` dataclass loaded from `data/world_sim/llm_config.json`;
+    CLI flags override file values; corrupt file degrades to defaults
+  - `generate()` / `chat()` against `/api/generate` and `/api/chat`
+  - `is_available()` / `list_models()` via `/api/tags`
+  - **Graceful-degradation contract**: every method returns `LLMResult`
+    (ok/text/error/model/elapsed_s) — never raises into sim/training code;
+    timeouts, unreachable servers, malformed JSON, redirects all handled
+- CLI — `worldsim llm status` (reachability, installed models, config echo,
+  warns if configured model not installed) and `worldsim llm ask --prompt`
+- Tests: 15 new, fully mocked HTTP (CI needs no Ollama); one live-gated
+  slow test auto-skips without server. Fast suite: 294 passing.
+
+### Decisions
+
+- **[DECISION] Default model llama3.1:8b, speed option gemma2:2b**: user's
+  installed models; llama3.1 follows instructions best for the structured
+  advice S27+ needs; everything is config so switching is one flag.
+- **[DECISION] stdlib urllib over httpx/requests**: one host, simple JSON
+  POSTs, no async yet — zero dependencies won.
+- **[DECISION] Default host 127.0.0.1 not localhost**: avoids IPv6-first
+  resolution quirks against Ollama's loopback listener.
+- **[DECISION] Redirects followed once manually preserving POST**: urllib
+  surfaces 307s as URLError("Temporary Redirect") instead of re-POSTing —
+  found live on first real call.
+- **[DECISION] Default timeout raised 30s → 180s**: first call may include
+  model load-from-disk on modest hardware (observed ~36s for llama3.1:8b).
+
+### Verification (live)
+
+```
+llm status: reachable=True, 7 models, llama3.1:8b configured ✓
+llm ask: coherent single-sentence answer in 35.75s ✓
+```
+
+---
+
 ## Session 26 — 2026-08-20 — Sprint 24: Anti-Reward-Hacking Systems (Phase 4 complete!)
 
 **What was built**
