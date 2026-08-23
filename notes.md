@@ -5,6 +5,49 @@ Decisions worth remembering are marked **[DECISION]**.
 
 ---
 
+## Session 31 — 2026-08-23 — Sprint 29: Periodic AI Reasoning
+
+**What was built**
+- `reasoning.py`:
+  - `ReasoningConfig` — all three trigger modes configurable and
+    combinable: interval (every N ticks, None disables), event-triggered
+    (raid/war/disaster/collapse/peace hitting the settlement since last
+    advice), struggling-only gate (low happiness / thin food per capita /
+    negative net food)
+  - `should_reason()` -> (due, why) with reason strings for telemetry;
+    `struggle_score()` (starvation dominates, then reserves, then
+    unhappiness; dead = inf) + `prioritize()` worst-first ordering
+  - `BackgroundAdvisor` — daemon-thread worker, AT MOST ONE in-flight
+    call per world; submit() non-blocking and silently rejected while
+    busy; poll() drains results keyed by settlement id; worker survives
+    client exceptions
+- `llm_agent.py` extended: `advisor=`/`config=` params — scheduler-gated
+  background requests replace the S28 synchronous path when set; results
+  consumed on a later tick's observe(); sync path preserved for compat.
+- Live verification: 50 ticks in 0.1s wall while real llama3.1:8b calls
+  ran in background (4 submits, zero blocking); manual-cycle run proved
+  consumption — advice completed, next cycle executed validated
+  BUILD_GRANARY.
+- 19 new tests. Fast suite: 381 passing.
+
+### Decisions
+
+- **[DECISION] One in-flight call per world, not per settlement**: the
+  budget being protected is inference throughput on one local Ollama;
+  a global slot makes queueing behavior predictable and starvation of
+  the worst settlement impossible via prioritize().
+- **[DECISION] Results keyed by settlement id, polled not pushed**: no
+  callback crosses into sim state mid-tick; agents consume at their own
+  observe() — keeps determinism of state transitions intact.
+- **[DECISION] last_reasoned_tick updates only on CONSUMED results**:
+  re-submitting while a request is in flight is wasted latency; failed
+  requests retry after the interval naturally.
+- **Bug found by tests**: tick-0 events were invisible to event mode
+  (floor=0 broke before scanning when no prior advice existed); fixed
+  with floor=-1 sentinel.
+
+---
+
 ## Session 30 — 2026-08-23 — Sprint 28: LLM → Intent → Validated Actions
 
 **What was built**

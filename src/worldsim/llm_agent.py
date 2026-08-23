@@ -19,10 +19,11 @@ from collections import deque
 import numpy as np
 
 from .actions import Action
-from .advice import AdviceResult, advise, build_advice_prompt
-from .agents import Agent, RuleBasedAgent, observe_vector
+from .advice import AdviceResult, advise
+from .agents import Agent, RuleBasedAgent
 from .intents import IntentTelemetry, map_advice_to_actions, validate_action
 from .llm import LLMConfig, OllamaClient
+from .reasoning import BackgroundAdvisor, ReasoningConfig, should_reason
 from .settlement import Settlement
 from .summaries import TIER_TINY, summarize_settlement
 
@@ -31,19 +32,29 @@ DEFAULT_ADVICE_INTERVAL_TICKS = 24
 
 class LLMDrivenAgent(Agent):
     """Rule-based decisions, overridden by validated LLM intent when fresh
-    advice exists."""
+    advice exists.
+
+    Two request paths:
+    - `client` only: synchronous advice inside observe() (S28 behavior).
+    - `advisor` set: non-blocking background requests gated by the
+      ReasoningConfig scheduler; results applied on a later tick."""
 
     def __init__(
         self,
         seed: int,
         settlement_index: int,
         client: OllamaClient | None = None,
+        advisor: BackgroundAdvisor | None = None,
+        config: ReasoningConfig | None = None,
         advice_interval_ticks: int = DEFAULT_ADVICE_INTERVAL_TICKS,
         tier: str = TIER_TINY,
     ) -> None:
         self.seed = seed
         self.index = settlement_index
         self.client = client
+        self.advisor = advisor
+        self.config = config or ReasoningConfig(
+            interval_ticks=advice_interval_ticks)
         self.advice_interval_ticks = advice_interval_ticks
         self.tier = tier
         self.fallback = RuleBasedAgent(seed, settlement_index)
@@ -56,7 +67,7 @@ class LLMDrivenAgent(Agent):
 
     @property
     def llm_active(self) -> bool:
-        return self.client is not None
+        return self.client is not None or self.advisor is not None
 
     def observe(self, sim, settlement: Settlement) -> np.ndarray:
         # Re-validate queued intents against CURRENT state: a farm intent
@@ -69,7 +80,20 @@ class LLMDrivenAgent(Agent):
             else:
                 self.telemetry.record_drop(f"stale_{reason}")
         self._pending = fresh
-        if (
+
+        if self.advisor is not None:
+            result = self.advisor.poll(settlement.id)
+            if result is not None and result.ok and result.advice is not None:
+                self._last_advice_tick = sim.tick
+                self._queue_intents(sim, settlement, result)
+            due, _why = should_reason(
+                self.config, sim, settlement, self._last_advice_tick)
+            if due and not self.advisor.busy:
+                summary = summarize_settlement(sim, settlement,
+                                               tier=self.tier)
+                self._last_summary = summary
+                self.advisor.submit(settlement.id, summary, settlement.name)
+        elif (
             self.client is not None
             and not self._pending
             and self._advice_due(sim.tick)
@@ -100,9 +124,11 @@ class LLMDrivenAgent(Agent):
         )
 
     def _request_and_queue_intents(self, sim, settlement: Settlement) -> None:
-        """Request advice, map + validate intents; never raises."""
+        """Synchronous path (S28): request advice, map + validate; never
+        raises."""
         try:
             summary = summarize_settlement(sim, settlement, tier=self.tier)
+            self._last_summary = summary
             result = self._call_advisor(summary, settlement.name)
         except Exception:  # noqa: BLE001 - provider bugs must not crash sims
             self.telemetry.advice_failures += 1
@@ -110,6 +136,10 @@ class LLMDrivenAgent(Agent):
         if result is None or not result.ok or result.advice is None:
             self.telemetry.advice_failures += 1
             return
+        self._queue_intents(sim, settlement, result)
+
+    def _queue_intents(self, sim, settlement: Settlement,
+                       result: AdviceResult) -> None:
         candidates = map_advice_to_actions(
             result.advice, telemetry=self.telemetry)
         for action in candidates:
