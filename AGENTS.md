@@ -22,10 +22,11 @@ Stable-Baselines3 (PPO) + matplotlib + psutil + scipy + Ollama
 (stdlib-urllib client, Phase 5).
 
 **Status:** Phase 1 ✅, Phase 2 ✅, Phase 3 ✅ (Sprints 12–18 + remediation;
-learning healthy in training metrics, eval metrics saturated), **Phase 5 in
-progress** (Phase 4 ✅ COMPLETE: S19–24; S25–29 done — Ollama,
-summarization, strategic reasoning, intent→validated-action agent,
-scheduled background reasoning; sprint docs expanded through Phase 10).
+learning healthy in training metrics, eval metrics saturated), **Phase 5 ✅
+COMPLETE** (S25–30: Ollama client, summarization, strategic reasoning,
+intent→validated-action agent, scheduled background reasoning, and a LIVE
+paired comparison showing LLM advice significantly improves
+territory/buildings/reward; sprint docs expanded through Phase 10).
 
 **Test tiers:** `pytest` = fast suite (~250 tests, ~3–5 min);
 `pytest -m slow` = long integration runs.
@@ -68,6 +69,7 @@ scheduled background reasoning; sprint docs expanded through Phase 10).
 | `86cec92` | 27 | Strategic reasoning: JSON advice prompts + strict parser, never-raise advise(), advisory log |
 | `0e30601` | 28 | Intent mapping onto frozen action space, pre-tick validation layer, LLMDrivenAgent with rule fallback |
 | `d740c70` | 29 | Reasoning scheduler (interval/event/struggling), single-flight background advisor, non-blocking sim loop |
+| `8784814` | 30 | Paired LLM-vs-rulebased comparison, Wilcoxon+permutation, llm compare CLI; live verdict: advice helps (**Phase 5 complete**) |
 
 ---
 
@@ -380,6 +382,31 @@ Agents replace auto-rules; the frozen RL contract is born
   the interval naturally.
 - Bug found by tests: tick-0 events invisible to event mode (floor=0);
   fixed with floor=-1 sentinel.
+
+### Session 32 — Sprint 30 (this session)
+- `comparison.py`: `_run_llm_arm()` mirrors `_run_baseline` tick-for-tick
+  (same raw §6.4 reward math) with settlement 0 LLMDriven;
+  `compare_llm_vs_baseline()` reuses paired-seed methodology and Sprint
+  17's report format; Wilcoxon + permutation p-values; `verdict_text()`
+  refuses to overstate (inconclusive when advice never landed).
+- CLI: `llm compare` — guards against unreachable Ollama, writes
+  report/chart, records verdict in training_runs.
+- **LIVE VERDICT (10 paired worlds, hard):** advice significantly
+  improves territory (+333 avg, p=0.0039), buildings (+10.2, p=0.002),
+  cumulative reward (p=0.002); survival/peak-pop tie at saturation.
+  182 validated LLM actions, 1 request failure. training_runs id=4.
+- **[DECISION] Deterministic-degradation equivalence**: with all advice
+  failing, fallback is byte-identical to the replaced agent — pinned by
+  test so degradation can never fake a win.
+- **[DECISION] Doc-vs-reality reconciliation**: plan said "ML-only vs
+  ML+LLM"; actual comparison is rule-based vs rules+LLM — isolates
+  exactly the "does advice help?" variable.
+- **Ops findings**: Ollama wedge root-caused to the user's sentinel
+  backend saturating the local model (not our code); PowerShell `>`
+  writes UTF-16 (use cmd /c for git show redirects); always name-check
+  new test files — I clobbered Sprint 17's test_comparison.py and lost
+  9 tests until collection counts flagged it (recovered as
+  test_sprint17_eval.py).
 
 ---
 
