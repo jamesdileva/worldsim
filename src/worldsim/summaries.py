@@ -105,6 +105,12 @@ def summarize_world(sim, tier: str = TIER_FULL,
 
     sections = [header]
 
+    from .markets import market_prices
+
+    price_txt = ", ".join(f"{r}={p}" for r, p in
+                          sorted(market_prices(sim).items()))
+    sections.append(f"Market prices per unit: {price_txt}")
+
     wars = _war_lines(sim)
     if wars:
         sections.append("Wars: " + "; ".join(wars))

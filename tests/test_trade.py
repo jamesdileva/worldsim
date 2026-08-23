@@ -123,7 +123,10 @@ def test_establish_route_between_adjacent():
     assert sim.establish_route(b, a) is None
 
 
-def test_trade_transfers_one_unit_per_tick():
+def test_trade_transfers_gap_scaled_units():
+    """Sprint 32: shipment size scales with the valuation gap."""
+    from worldsim.markets import BASE_TRADE_UNITS, MAX_TRADE_UNITS
+
     sim, (a, b, _) = make_sim(seed=42, count=3)
     force_adjacent(sim, a, b)
     a.resource_inventory["wood"] = 100.0
@@ -132,8 +135,9 @@ def test_trade_transfers_one_unit_per_tick():
     before_a = a.resource_inventory["wood"]
     before_b = b.resource_inventory["wood"]
     sim._trade_tick(route)
-    assert a.resource_inventory["wood"] == before_a - TRADE_AMOUNT_PER_TICK
-    assert b.resource_inventory["wood"] == before_b + TRADE_AMOUNT_PER_TICK
+    moved = before_a - a.resource_inventory["wood"]
+    assert BASE_TRADE_UNITS <= moved <= MAX_TRADE_UNITS
+    assert b.resource_inventory["wood"] == pytest.approx(before_b + moved)
     assert route.transfers == 1
 
 
@@ -144,22 +148,26 @@ def test_trade_direction_follows_surplus():
     b.resource_inventory["stone"] = 0.0
     route = sim.establish_route(a, b)
     sim._trade_tick(route)
-    assert b.resource_inventory["stone"] == 1.0
+    assert b.resource_inventory["stone"] >= 1.0
     # Flip the imbalance: now B donates back.
-    b.resource_inventory["stone"] = 90.0
+    moved_ab = b.resource_inventory["stone"]
+    b.resource_inventory["stone"] = 90.0 + moved_ab
     a.resource_inventory["stone"] = 0.0
     sim._trade_tick(route)
-    assert a.resource_inventory["stone"] == 1.0
+    assert a.resource_inventory["stone"] >= 1.0
+    assert b.resource_inventory["stone"] < 90.0 + moved_ab
 
 
 def test_food_is_tradable():
+    from worldsim.markets import BASE_TRADE_UNITS
+
     sim, (a, b, _) = make_sim(seed=42, count=3)
     force_adjacent(sim, a, b)
     a.food_stock = 1000.0
     b.food_stock = 0.0
     route = sim.establish_route(a, b)
     sim._trade_tick(route)
-    assert b.food_stock == pytest.approx(TRADE_AMOUNT_PER_TICK)
+    assert b.food_stock > BASE_TRADE_UNITS
 
 
 def test_route_deactivates_when_partner_dies():

@@ -742,6 +742,33 @@ history. Several items extend existing systems (diplomacy, collapse).
 | 36 | Collapse/recovery depth | Extends S5 ruins/happiness with era mechanics |
 | 37 | Long-term historical simulation | Stability + performance at 100k+ ticks |
 
+### Sprint 32 — Advanced Economies (detailed)
+
+**Duration:** 1 week
+**Deliverable:** Derived market prices; trade flows driven by valuation
+gaps instead of fixed unit transfers.
+
+**Tasks:**
+- `markets.py`: prices DERIVED per resource from mean per-capita
+  availability across living settlements (base × reference/(reference +
+  4·avail), clamped to [0.25, 8.0]; metal base 2×). Pure function of
+  state — nothing persisted, cannot desynchronize.
+- Valuation gaps: donor-surplus vs receiver-scarcity ratio, deficits
+  clamped at zero (collapse inventories must not divide by ~zero)
+- `_trade_tick` rewrite: direction by largest valuation gap (either
+  route end); shipment size = linear-in-gap up to 4 units, Era III
+  donors +25% on top; shipments clamped to donor stock; dust (<0.5
+  units) skipped
+- Summaries: full world tier gains a "Market prices per unit" line so
+  LLM advisors can reason about prices
+
+**Acceptance criteria:**
+- Determinism preserved (byte-identical runs incl. trade outcomes)
+- Frozen RL contract untouched (62 actions / 60 obs dims)
+- Prices respond monotonically to scarcity/abundance within bounds
+- Desperate receivers get larger shipments than well-supplied partners;
+  donor stock always respected
+
 ### Sprint 31 — Technology & Civilization Eras (detailed)
 
 **Duration:** 1 week

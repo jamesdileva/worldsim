@@ -732,7 +732,10 @@ class Simulation:
         return route
 
     def _trade_tick(self, route: TradeRoute) -> None:
-        """Move 1 unit of the best-arbitrage resource across the route."""
+        """Move the most-valued resource across the route (Sprint 32:
+        valuation-gap direction, gap-scaled shipment size)."""
+        from .markets import best_trade, transfer_units
+
         source = self.settlement_by_id(route.source_id)
         dest = self.settlement_by_id(route.dest_id)
         if (
@@ -743,50 +746,35 @@ class Simulation:
         ):
             route.active = False
             return
-        amounts_src = self._amounts(source)
-        amounts_dst = self._amounts(dest)
-        donor: Settlement | None = None
-        receiver: Settlement | None = None
-        best_resource: str | None = None
-        best_gain = 0.0
-        for resource in TRADE_RESOURCES:
-            gain_ab = amounts_src[resource] - amounts_dst[resource]
-            gain_ba = amounts_dst[resource] - amounts_src[resource]
-            if gain_ab > best_gain:
-                best_gain, best_resource = gain_ab, resource
-                donor, receiver = source, dest
-            if gain_ba > best_gain:
-                best_gain, best_resource = gain_ba, resource
-                donor, receiver = dest, source
-        if donor is None or receiver is None or best_resource is None:
+        forward = best_trade(self, source, dest)
+        backward = best_trade(self, dest, source)
+        if forward is None and backward is None:
+            return
+        if backward is None or (
+            forward is not None and forward[1] >= backward[1]
+        ):
+            donor, receiver, best_resource, gap = (
+                source, dest, forward[0], forward[1])
+        else:
+            donor, receiver, best_resource, gap = (
+                dest, source, backward[0], backward[1])
+
+        units = transfer_units(gap, donor.era >= 3)
+        if best_resource == "food":
+            available = donor.food_stock
+        else:
+            available = donor.resource_inventory.get(best_resource, 0.0)
+        units = min(units, max(0.0, available))
+        if units < 0.5:
             return
         if best_resource == "food":
-            donor.food_stock -= TRADE_AMOUNT_PER_TICK
-            receiver.food_stock += TRADE_AMOUNT_PER_TICK
+            donor.food_stock -= units
+            receiver.food_stock += units
         else:
-            donor.resource_inventory[best_resource] -= TRADE_AMOUNT_PER_TICK
+            donor.resource_inventory[best_resource] -= units
             receiver.resource_inventory[best_resource] = (
-                receiver.resource_inventory.get(best_resource, 0.0)
-                + TRADE_AMOUNT_PER_TICK
+                receiver.resource_inventory.get(best_resource, 0.0) + units
             )
-        # Sprint 31: Era III donors move larger shipments.
-        from .tech import ERA3_ROUTE_TRANSFER_BONUS
-
-        extra = (
-            TRADE_AMOUNT_PER_TICK * ERA3_ROUTE_TRANSFER_BONUS
-            if donor.era >= 3
-            else 0.0
-        )
-        if extra:
-            if best_resource == "food":
-                donor.food_stock -= extra
-                receiver.food_stock += extra
-            else:
-                donor.resource_inventory[best_resource] -= extra
-                receiver.resource_inventory[best_resource] = (
-                    receiver.resource_inventory.get(best_resource, 0.0)
-                    + extra
-                )
         route.transfers += 1
         self._interacted_this_tick.update((source.id, dest.id))
         self.relations.adjust(source.id, dest.id, TRADE_TRANSFER_BONUS)

@@ -5,6 +5,43 @@ Decisions worth remembering are marked **[DECISION]**.
 
 ---
 
+## Session 34 — 2026-08-23 — Sprint 32: Advanced Economies
+
+**What was built**
+- `markets.py`: derived world market prices — per resource,
+  price = base × reference/(reference + 4×mean-per-capita-availability),
+  clamped [0.25, 8.0]; metal base 2× (no production building yet).
+  Pure function of state, nothing persisted (mirrors derived eras).
+- Valuation gaps: (donor_avail − receiver_avail)/(min+1), deficits
+  clamped to zero — negative collapse inventories must not divide by
+  ~zero (found live: ZeroDivisionError in competition fixtures).
+- `_trade_tick` rewrite: direction = largest valuation gap across both
+  route ends; shipment size linear in gap up to 4 units; Era III
+  donors +25% ON TOP of the cap; shipments clamped to donor stock;
+  dust (<0.5) skipped. Alliance/relations bookkeeping untouched.
+- Summaries: full world tier shows "Market prices per unit" so LLM
+  advisors can reason about the economy.
+- Live smoke: prices slid toward floor as stockpiles grew (metal stayed
+  priciest); 1176 gap-scaled transfers over 400 ticks on seed 42.
+- 15 new tests; 3 Sprint 4 trade tests re-pinned from fixed-unit
+  behavior to the new gap-scaled invariants. Fast suite: 416 passing.
+
+### Decisions
+
+- **[DECISION] Prices derived, never stored**: like eras — fewer
+  serialized fields and no way for prices to desync from the world.
+- **[DECISION] Deficits clamp to zero in valuation math**: availability
+  can be negative during economic collapse (S5 scarcity); the gap
+  formula's min+1 denominator would hit exactly −1 → division by zero.
+- **[DECISION] Era III bonus applies after the unit cap**: cap limits
+  normal logistics; administration tech represents superior commercial
+  organization that legitimately exceeds it.
+- **[DECISION] Direction by valuation gap, not raw surplus**: raw
+  differences ignore how much each side NEEDS the good; gaps route
+  goods toward desperation.
+
+---
+
 ## Session 33 — 2026-08-23 — Sprint 31: Technology & Eras (Phase 6 begins)
 
 **What was built**
