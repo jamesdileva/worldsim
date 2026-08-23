@@ -300,6 +300,25 @@ def build_parser() -> argparse.ArgumentParser:
         help="Path to a strategy_priors.json (default: standard policies "
              "dir path; missing file = no priors)",
     )
+
+    disc = rl_sub.add_parser(
+        "discover",
+        help="Cluster champion rollouts into emergent strategies (Sprint 23)",
+    )
+    disc.add_argument("--gens", default="gen1",
+                      help="Comma-separated generation labels to probe")
+    disc.add_argument("--worlds-per-gen", type=int, default=2,
+                      help="Probe worlds per generation")
+    disc.add_argument("--ticks", type=int, default=600,
+                      help="Ticks per probe world")
+    disc.add_argument("--size", type=int, default=48)
+    disc.add_argument("--settlements", type=int, default=3)
+    disc.add_argument("--clusters", type=int, default=3)
+    disc.add_argument(
+        "--novelty-threshold", type=float, default=0.55,
+        help="Centroid distance beyond which a cluster counts as novel",
+    )
+    return parser
     return parser
 
 
@@ -738,6 +757,8 @@ def cmd_rl(args: argparse.Namespace) -> int:
         return _cmd_rl_dashboard(args)
     if args.rl_command == "evolve":
         return _cmd_rl_evolve(args)
+    if args.rl_command == "discover":
+        return _cmd_rl_discover(args)
     print(f"unknown rl command: {args.rl_command}", file=sys.stderr)
     return 2
 
@@ -1126,6 +1147,67 @@ def _cmd_rl_head_to_head(args: argparse.Namespace) -> int:
     finally:
         store.close()
     print(f"results written to {out}; match recorded in training_runs")
+    return 0
+
+
+def _cmd_rl_discover(args: argparse.Namespace) -> int:
+    """Sprint 23: behavioral clustering + novelty detection over champion
+    rollouts; discovered strategies persisted with exemplars."""
+    from .db import WorldStore
+    from .discovery import (
+        DISCOVERY_LOG_PATH,
+        collect_generation_samples,
+        discover_strategies,
+        save_discovery_log,
+    )
+    from .training import resolve_policy_path
+
+    generations = [g.strip() for g in args.gens.split(",") if g.strip()]
+    seeds = [70000 + i * 37 for i in range(args.worlds_per_gen)]
+
+    samples = []
+    store = WorldStore(DEFAULT_DB_PATH)
+    try:
+        for gen in generations:
+            resolved, _record = resolve_policy_path(store, gen)
+            gen_samples = collect_generation_samples(
+                model_path=resolved,
+                generation=gen,
+                seeds=seeds,
+                size=args.size,
+                num_settlements=args.settlements,
+                ticks=args.ticks,
+            )
+            samples.extend(gen_samples)
+            print(f"[discover] {gen}: collected {len(gen_samples)} samples")
+    finally:
+        store.close()
+
+    analysis = discover_strategies(
+        samples, n_clusters=args.clusters,
+        novelty_threshold=args.novelty_threshold,
+    )
+
+    print(f"\nDiscovered {len(analysis['clusters'])} strategy clusters:")
+    for cluster in analysis["clusters"]:
+        novelty = "  [NOVEL]" if cluster["novel"] else ""
+        print(
+            f"  {cluster['name']:<24} size={cluster['size']} "
+            f"weak-label={cluster['weak_supervision_label']:<13} "
+            f"closest-known={cluster['closest_known']} "
+            f"(d={cluster['closest_distance']}){novelty}"
+        )
+        print(f"    centroid: {cluster['centroid']}")
+        exemplars = [
+            m for m in cluster["members"]
+            if m.get("checkpoint_path")
+        ]
+        if exemplars:
+            print(f"    exemplar: {exemplars[0]}")
+
+    log_path = save_discovery_log(analysis["clusters"],
+                                  DISCOVERY_LOG_PATH)
+    print(f"\ndiscovery log written to {log_path}")
     return 0
 
 

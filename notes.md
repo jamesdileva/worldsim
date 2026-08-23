@@ -5,6 +5,54 @@ Decisions worth remembering are marked **[DECISION]**.
 
 ---
 
+## Session 25 — 2026-08-20 — Sprint 23: Strategy Discovery
+
+**What was built**
+- `discovery.py` —
+  - `behavior_signature()`: normalized 6-dim vector (farm/income/granary
+    building shares + capped routes/raids/roads activity)
+  - `collect_generation_samples()`: runs each generation's champion across
+    probe worlds, collecting per-settlement signatures + Sprint 11 labels
+  - `cluster_signatures()`: scipy k-means++ over signatures (falls back to
+    fewer clusters when samples are scarce)
+  - `discover_strategies()`: clusters named by dominant feature; weak
+    supervision from member label majorities; novelty = centroid distance
+    beyond threshold from EVERY archetype reference centroid
+  - `save/load_discovery_log()`; exemplars stored per cluster (checkpoint
+    path + seed) for re-instantiation
+- CLI — `rl discover --gens gen1r,gen3r --worlds-per-gen N --ticks T
+  --clusters K --novelty-threshold F`
+- Tests: 7 new. Fast suite: 279 passing.
+
+### Decisions
+
+- **[DECISION] Signatures normalized by share + activity caps**: raw counts
+  made farm-heavy mixes indistinguishable (Sprint 11 lesson reused); shares
+  separate composition, capped activity dims separate intensity.
+- **[DECISION] scipy k-means++ with seeded init** — deterministic given the
+  same sample set; no sklearn dependency.
+- **[DECISION] Novelty = distance from ALL archetype reference centroids**
+  rather than low in-cluster density: flags genuinely uncharted behavior,
+  not just sparse data.
+- **[DECISION] Weak supervision via member-label majority vote**, reported
+  alongside the dominant-feature name so discovered clusters stay grounded
+  in known vocabulary when possible.
+
+### Verification (live, gen1r vs gen3r champions)
+
+```
+14 settlements sampled across 2 gens x 2 probe worlds:
+  3 clusters found, TWO flagged [NOVEL]:
+    roads-focused-novel (x2 variants) — road spam d=0.75/0.85 from any
+    archetype; nobody scripted road-heavy play
+  exemplars recorded (gen1r checkpoint + seeds) → re-runnable
+```
+
+The novel road-centric strategies are exactly the "I never programmed this"
+behaviors the roadmap's ultimate success criterion asks for.
+
+---
+
 ## Session 24 — 2026-08-20 — Sprint 22: Self-Play / Civilization Competition
 
 **What was built**
