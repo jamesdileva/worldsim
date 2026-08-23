@@ -29,7 +29,7 @@ paired comparison showing LLM advice significantly improves
 territory/buildings/reward; sprint docs expanded through Phase 10),
 **Phase 6 in progress** (S31 technology & eras done; S32 market
 economies done; S33 highways/infrastructure done; S34 treaties &
-federations done).
+federations done; S35 warfare done).
 
 **Test tiers:** `pytest` = fast suite (~250 tests, ~3–5 min);
 `pytest -m slow` = long integration runs.
@@ -77,6 +77,7 @@ federations done).
 | `a35048f` | 32 | Market economies: derived prices, valuation-gap trade direction, gap-scaled shipments |
 | `c8b6586` | 33 | Large-scale infrastructure: inter-settlement highway projects, pay-as-you-go segments, +30% trade bonus |
 | `aff5026` | 34 | Advanced diplomacy: treaties with clauses, derived federations, +15% intra-federation shipments |
+| `db6372a` | 35 | Warfare: armies/forts/sieges, wired military action slots, deterministic battles, victor-imposed tribute treaties |
 
 ---
 
@@ -507,6 +508,27 @@ Agents replace auto-rules; the frozen RL contract is born
 - **[DECISION] Tribute-only treaties need conflict**: friendly pairs
   sign trade/non-aggression pacts; tribute imposition awaits S35
   warfare. Mixed-clause treaties may include it.
+
+### Session 37 — Sprint 35 (this session)
+- `warfare.py`: armies (float pool), forts (battle defense, capped 3),
+  siege_progress persisted on settlements; TRAIN_RAIDER/TRAIN_DEFENDER/
+  FORTIFY_BORDER wired from reserved slots (frozen IDs); field battles
+  every 100 ticks per war with home-ground/fort defense multipliers and
+  seeded rng; winner −15% army, loser −30%; SIEGE at 3 attacker wins →
+  victor-imposed tribute treaty ends the war; WAR_EXHAUSTION_TICKS
+  white-peaces stale wars; upkeep eats food, starving armies melt.
+- Live: Brazemi won a field battle, then bilateral peace policies ended
+  the war before the siege matured — warfare/diplomacy interplay is
+  emergent. Fast suite: 466 passing.
+- **[DECISION] Wiring reserved IDs is sanctioned**: agent_spec's "wire
+  real features into reserved slots" — DISBAND_MILITARY etc. stay
+  no-ops until needed; no renumbering, still 62 actions.
+- **[DECISION] One shared army pool**: forts + home ground give
+  defenders their edge; splitting off/def pools rejected as bookkeeping
+  without depth.
+- **[DECISION] Sieges impose treaties, not city capture**: capitulation
+  via victor-imposed tribute reuses S34 machinery and avoids ownership
+  transfer this sprint.
 
 ---
 
