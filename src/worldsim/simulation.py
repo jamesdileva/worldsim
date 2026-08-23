@@ -220,6 +220,8 @@ class Simulation:
     # Sprint 17: difficulty knobs for benchmark/evaluation worlds.
     disaster_chance_mult: float = 1.0
     gather_mult: float = 1.0
+    # Sprint 33: inter-settlement highway construction projects.
+    highway_projects: list = field(default_factory=list)
 
     @property
     def tick(self) -> int:
@@ -622,7 +624,11 @@ class Simulation:
         return connected, roads - connected
 
     def _auto_road_rule(self, settlement: Settlement) -> None:
-        """Extend the road network by one tile toward unimproved territory."""
+        """Extend the road network by one tile toward unimproved territory;
+        when own territory is fully roaded, sponsor highways instead
+        (Sprint 33)."""
+        from .infrastructure import maybe_start_highways
+
         roads = self.roads_of(settlement)
         anchor = (
             roads
@@ -645,6 +651,8 @@ class Simulation:
                 ):
                     if self.build_road(settlement, nx, ny):
                         return
+        # Own network saturated: look outward.
+        maybe_start_highways(self, settlement)
 
     # ------------------------------------------------------------------
     # Trade (Sprint 4)
@@ -767,6 +775,9 @@ class Simulation:
         units = min(units, max(0.0, available))
         if units < 0.5:
             return
+        from .infrastructure import highway_trade_multiplier
+
+        units *= highway_trade_multiplier(self, donor.id, receiver.id)
         if best_resource == "food":
             donor.food_stock -= units
             receiver.food_stock += units
@@ -1598,6 +1609,10 @@ class Simulation:
                         continue
             else:
                 settlement.negative_inventory_progress = 0
+        # Highways advance one tick of construction (Sprint 33).
+        from .infrastructure import advance_projects
+
+        advance_projects(self)
         # Trade: transfer every tick (route establishment is agent-driven).
         for route in self.trade_routes:
             if route.active:
@@ -1755,6 +1770,7 @@ def simulation_from_state(
     event_log: list[WorldEvent] | None = None,
     diplomacy: DiplomacyState | None = None,
     strategy_memory: dict | None = None,
+    highway_projects: list | None = None,
 ) -> Simulation:
     """Rebuild a Simulation from deserialized snapshot state (Sprint 6).
 
@@ -1772,6 +1788,7 @@ def simulation_from_state(
         event_log=event_log or [],
         diplomacy=diplomacy if diplomacy is not None else DiplomacyState(),
         strategy_memory=strategy_memory or {},
+        highway_projects=highway_projects or [],
     )
     sim.agents = [
         RuleBasedAgent(world.seed, idx) for idx in range(len(settlements))

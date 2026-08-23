@@ -198,7 +198,8 @@ def test_strategy_memory_persists():
             diplomacy=sim.diplomacy,
             strategy_memory=sim.strategy_memory,
         )
-        (*_, memory) = store.load_latest_snapshot(wid)
+        loaded = store.load_latest_snapshot(wid)
+        memory = loaded[-2]  # strategy_memory is second-to-last
         assert memory == sim.strategy_memory
     finally:
         store.close()

@@ -396,6 +396,7 @@ def _autosave(store: WorldStore, args, sim: Simulation, world_id: str | None) ->
         event_log=sim.event_log,
         diplomacy=sim.diplomacy,
         strategy_memory=sim.strategy_memory,
+        highway_projects=sim.highway_projects,
     )
     return store.save_world_with_id(
         world_id if world_id is not None else str(uuid.uuid4()), sim.world, **kwargs
@@ -514,6 +515,7 @@ def cmd_load(args: argparse.Namespace) -> int:
             events,
             diplomacy,
             strategy_memory,
+            *_,
         ) = store.load_latest_snapshot(args.world_id)
     finally:
         store.close()
@@ -567,6 +569,7 @@ def cmd_step(args: argparse.Namespace) -> int:
             events,
             diplomacy,
             strategy_memory,
+            *_,
         ) = store.load_latest_snapshot(args.world_id)
         sim = simulation_from_state(
             world,
@@ -624,6 +627,7 @@ def cmd_god(args: argparse.Namespace) -> int:
             events,
             diplomacy,
             strategy_memory,
+            *_,
         ) = store.load_latest_snapshot(args.world_id)
         sim = simulation_from_state(
             world,

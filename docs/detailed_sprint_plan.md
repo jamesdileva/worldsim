@@ -742,6 +742,33 @@ history. Several items extend existing systems (diplomacy, collapse).
 | 36 | Collapse/recovery depth | Extends S5 ruins/happiness with era mechanics |
 | 37 | Long-term historical simulation | Stability + performance at 100k+ ticks |
 
+### Sprint 33 — Large-Scale Infrastructure (detailed)
+
+**Duration:** 1 week
+**Deliverable:** Multi-tick inter-settlement highway projects bridging
+unowned land between adjacent territories.
+
+**Tasks:**
+- `infrastructure.py`: `HighwayProject` (uuid5 ids, L-shaped deterministic
+  paths from spawn to spawn, water/existing-road tiles skipped);
+  `can_start_highway` legality (Era II masonry, territory adjacency,
+  one project per pair); pay-as-you-go construction — sponsors spend
+  stone per segment per tick, projects PAUSE when funds run dry, roads
+  appear progressively; Era III sponsors lay 2 segments/tick
+- Simulation: `highway_projects` field; `advance_projects()` each tick;
+  `_auto_road_rule` falls through to `maybe_start_highways` when own
+  network saturates (rule agents + LLM agents benefit without new
+  actions)
+- Effect: trade routes between completed-highway endpoints ship +30%
+- Persistence: serialize/deserialize projects; summaries gain a
+  "Highways: N operational, M under construction" line
+
+**Acceptance criteria:**
+- Deterministic ids/paths/progress across identical seeds
+- Paused (not cancelled) when sponsor lacks stone; resumes when funded
+- Highway-connected routes measurably out-ship unconnected ones
+- Save/load round-trips projects exactly; frozen contract untouched
+
 ### Sprint 32 — Advanced Economies (detailed)
 
 **Duration:** 1 week

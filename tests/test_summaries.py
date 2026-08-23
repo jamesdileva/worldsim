@@ -63,6 +63,7 @@ class StubSim:
         self.diplomacy = StubDiplomacy()
         self.event_log = []
         self.settlements = []
+        self.highway_projects = []
         self._buildings = {}
         self._territory = {}
         self._neighbors = {}

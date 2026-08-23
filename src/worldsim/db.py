@@ -312,6 +312,34 @@ def _decode_debuff(obj: dict) -> BuildingDebuff:
     )
 
 
+def _encode_highway(p) -> dict:
+    return {
+        "id": p.id,
+        "a_id": p.a_id,
+        "b_id": p.b_id,
+        "sponsor_id": p.sponsor_id,
+        "path": [[y, x] for y, x in p.path],
+        "segments_done": p.segments_done,
+        "start_tick": p.start_tick,
+        "completed": p.completed,
+    }
+
+
+def _decode_highway(obj: dict):
+    from .infrastructure import HighwayProject
+
+    return HighwayProject(
+        a_id=obj["a_id"],
+        b_id=obj["b_id"],
+        sponsor_id=obj["sponsor_id"],
+        path=[(y, x) for y, x in obj["path"]],
+        segments_done=obj.get("segments_done", 0),
+        start_tick=obj.get("start_tick", 0),
+        completed=obj.get("completed", False),
+        id=obj["id"],
+    )
+
+
 def serialize_world(
     world: World,
     settlements: list[Settlement] | None = None,
@@ -324,6 +352,7 @@ def serialize_world(
     event_log: list[WorldEvent] | None = None,
     diplomacy: DiplomacyState | None = None,
     strategy_memory: dict | None = None,
+    highway_projects: list | None = None,
 ) -> str:
     state = {
         "seed": world.seed,
@@ -359,6 +388,9 @@ def serialize_world(
         "strategy_memory": [
             {"archetype": arch, "action": action, "ema_reward": value}
             for (arch, action), value in (strategy_memory or {}).items()
+        ],
+        "highway_projects": [
+            _encode_highway(p) for p in (highway_projects or [])
         ],
     }
     return json.dumps(state, sort_keys=True)
@@ -421,6 +453,9 @@ def deserialize_world(
         (obj["archetype"], int(obj["action"])): obj["ema_reward"]
         for obj in state.get("strategy_memory", [])
     }
+    highway_projects = [
+        _decode_highway(obj) for obj in state.get("highway_projects", [])
+    ]
     return (
         world,
         settlements,
@@ -433,6 +468,7 @@ def deserialize_world(
         event_log,
         diplomacy,
         strategy_memory,
+        highway_projects,
     )
 
 
@@ -472,6 +508,7 @@ class WorldStore:
         event_log: list[WorldEvent] | None = None,
         diplomacy: DiplomacyState | None = None,
         strategy_memory: dict | None = None,
+        highway_projects: list | None = None,
     ) -> str:
         """Insert a world row, write a snapshot, and upsert settlement,
         resource, and trade-route rows."""
@@ -500,6 +537,7 @@ class WorldStore:
                         event_log,
                         diplomacy,
                         strategy_memory,
+                        highway_projects,
                     ),
                 ),
             )
@@ -605,6 +643,7 @@ class WorldStore:
         event_log: list[WorldEvent] | None = None,
         diplomacy: DiplomacyState | None = None,
         strategy_memory: dict | None = None,
+        highway_projects: list | None = None,
     ) -> str:
         """Save under a caller-chosen id (upsert)."""
         if self.world_exists(world_id):
@@ -621,6 +660,7 @@ class WorldStore:
                 event_log=event_log,
                 diplomacy=diplomacy,
                 strategy_memory=strategy_memory,
+                highway_projects=highway_projects,
             )
             return world_id
         created_at = datetime.now(timezone.utc).isoformat()
@@ -646,6 +686,7 @@ class WorldStore:
                         event_log,
                         diplomacy,
                         strategy_memory,
+                        highway_projects,
                     ),
                 ),
             )
@@ -701,6 +742,7 @@ class WorldStore:
         event_log: list[WorldEvent] | None = None,
         diplomacy: DiplomacyState | None = None,
         strategy_memory: dict | None = None,
+        highway_projects: list | None = None,
     ) -> None:
         """Write a new snapshot for an existing world and bump last_tick."""
         if not self.world_exists(world_id):
@@ -728,6 +770,7 @@ class WorldStore:
                         event_log,
                         diplomacy,
                         strategy_memory,
+                        highway_projects,
                     ),
                 ),
             )

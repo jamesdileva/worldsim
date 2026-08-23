@@ -111,6 +111,14 @@ def summarize_world(sim, tier: str = TIER_FULL,
                           sorted(market_prices(sim).items()))
     sections.append(f"Market prices per unit: {price_txt}")
 
+    highways_done = sum(
+        1 for p in sim.highway_projects if p.completed)
+    highways_wip = len(sim.highway_projects) - highways_done
+    sections.append(
+        f"Highways: {highways_done} operational, {highways_wip} under "
+        f"construction"
+    )
+
     wars = _war_lines(sim)
     if wars:
         sections.append("Wars: " + "; ".join(wars))

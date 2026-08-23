@@ -5,6 +5,49 @@ Decisions worth remembering are marked **[DECISION]**.
 
 ---
 
+## Session 35 — 2026-08-23 — Sprint 33: Large-Scale Infrastructure
+
+**What was built**
+- `infrastructure.py`: inter-settlement highway projects —
+  - `HighwayProject` with deterministic uuid5 ids and L-shaped paths
+    from spawn to spawn (water/existing-road tiles skipped)
+  - Legality: Era II masonry required, territories adjacent, one project
+    per pair; highways may cross UNOWNED land (that's their purpose —
+    regular roads are owned-tiles-only)
+  - Pay-as-you-go: sponsor spends stone per segment per tick; projects
+    PAUSE (never cancel) when funds run dry; roads appear progressively;
+    Era III sponsors lay 2 segments/tick
+- Simulation: `highway_projects` field advanced each tick via
+  `advance_projects()`; `_auto_road_rule` falls through to highway
+  sponsorship when own territory is fully roaded — rule agents AND LLM
+  agents benefit with zero new actions.
+- Effect: trade routes between completed-highway endpoints ship +30%.
+- Persistence plumbing: serialize/deserialize grew a 12th element
+  (highway_projects); all explicit unpackings updated; summaries show
+  "Highways: N operational, M under construction".
+- Live smoke: on seed 42, Brazemi naturally sponsored and completed a
+  28-segment highway toward Unovaova by tick 1200, both infrastructure
+  events logged.
+- 14 new tests. Fast suite: 430 passing in BOTH pytest-randomly orders.
+
+### Decisions
+
+- **[DECISION] No new actions**: reserved infra action IDs stay
+  untouched; the auto-road rule gains a fall-through so every agent type
+  sponsors highways organically. Wiring no-ops would shift dynamics for
+  trained policies (agent_spec sanctions it, but there's no need yet).
+- **[DECISION] Pause-don't-cancel on empty treasury**: funding gaps are
+  temporary; cancelling would waste paid segments. Resumes when stone
+  returns.
+- **[DECISION] Era III speed, not cost**: administration doubles lay
+  rate (2 segments/tick) rather than discounting stone — commercial
+  organization speeds work, masonry quality keeps price.
+- **Gotcha**: growing deserialize_world's return tuple breaks every
+  explicit unpacking across cli/tests — prefer `*_, last` or index
+  access in tests; fixed five call sites this session.
+
+---
+
 ## Session 34 — 2026-08-23 — Sprint 32: Advanced Economies
 
 **What was built**
