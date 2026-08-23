@@ -22,9 +22,8 @@ Stable-Baselines3 (PPO) + matplotlib + psutil + scipy.
 
 **Status:** Phase 1 ✅, Phase 2 ✅, Phase 3 ✅ (Sprints 12–18 + remediation;
 learning healthy in training metrics, eval metrics saturated), **Phase 4 in
-progress** (Sprint 19 done: populations + generational training; Sprint 20
-done: mutation + elitism + lineage types + strategy-shift report; sprint
-docs expanded through Phase 10).
+progress** (S19 populations, S20 mutation/elitism, S21 cross-generation
+learning done; sprint docs expanded through Phase 10).
 
 **Test tiers:** `pytest` = fast suite (~250 tests, ~3–5 min);
 `pytest -m slow` = long integration runs.
@@ -58,6 +57,7 @@ docs expanded through Phase 10).
 | `44e34d1` | 18b | Learning remediation: entropy capture fix, configurable reward weights, controlled retraining (no regressions) |
 | `0a9f070` | 19 | Population manager, champion selection/promotion, lineage; sprint docs expanded through Phase 10 (**Phase 4 begins**) |
 | `aa0bd9d` | 20 | Weight mutation, elitism, mutant scoring via rollouts, lineage types, strategy-shift report |
+| `ed3b232` | 21 | Strategy-memory aggregation into population priors, failure-weighted curricula |
 
 ---
 
@@ -194,6 +194,25 @@ Agents replace auto-rules; the frozen RL contract is born
 - `strategy_shift_report()`: per-generation settlement label distributions —
   first view of how behavior mix evolves under evolutionary pressure.
 - Verified live: gen2's elite won its tie vs a mutant (0.8113).
+
+### Session 23 — Sprint 21 (this session)
+- `merge_strategy_memories()`: EMA-weighted merge of per-generation
+  action-reward tables into a population prior (later gens weigh more);
+  persisted as `strategy_priors.json` next to checkpoints.
+- RuleBasedAgent consumes the prior on idle-fallback decisions (prefers
+  historically-rewarded actions); deterministic seeded rng keeps the
+  stateless/resumable property; lazy import breaks the agents→population
+  import cycle.
+- **Curriculum**: champion scored across an eval seed-set each generation;
+  below-mean seeds become the NEXT generation's fresh-candidate training
+  worlds. Mechanism verified structurally.
+- **Finding**: tiny 32-tile smoke worlds produce seed-independent dynamics
+  (best-spawn search finds all-fertile squares) — score variance and thus
+  meaningful curricula need full-size worlds. Regression-reduction
+  measurement deferred to full-scale evolution runs.
+- **[WHY] Curriculum = training worlds, not reward changes**: candidates
+  that failed before train ON those worlds — targeted practice, no reward
+  distortion.
 
 ---
 
