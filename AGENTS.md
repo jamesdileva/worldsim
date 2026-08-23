@@ -23,9 +23,9 @@ Stable-Baselines3 (PPO) + matplotlib + psutil + scipy + Ollama
 
 **Status:** Phase 1 ✅, Phase 2 ✅, Phase 3 ✅ (Sprints 12–18 + remediation;
 learning healthy in training metrics, eval metrics saturated), **Phase 5 in
-progress** (Phase 4 ✅ COMPLETE: S19–24; S25 Ollama integration, S26 state
-summarization, S27 strategic reasoning done; sprint docs expanded through
-Phase 10).
+progress** (Phase 4 ✅ COMPLETE: S19–24; S25 Ollama, S26 summarization, S27
+strategic reasoning, S28 intent→validated-action agent done; sprint docs
+expanded through Phase 10).
 
 **Test tiers:** `pytest` = fast suite (~250 tests, ~3–5 min);
 `pytest -m slow` = long integration runs.
@@ -66,6 +66,7 @@ Phase 10).
 | `43297e8` | 25 | Ollama integration: zero-dep urllib client, graceful degradation, config precedence, llm status/ask CLI (**Phase 5 begins**) |
 | `045ac39` | 26 | Settlement/world state summarization: deterministic token-budgeted tiny/full prompt views |
 | `86cec92` | 27 | Strategic reasoning: JSON advice prompts + strict parser, never-raise advise(), advisory log |
+| `0e30601` | 28 | Intent mapping onto frozen action space, pre-tick validation layer, LLMDrivenAgent with rule fallback |
 
 ---
 
@@ -333,6 +334,28 @@ Agents replace auto-rules; the frozen RL contract is born
   request queue (/api/tags healthy, generation hung forever, CLI spinner
   produced no tokens). Restart fixed it; worth remembering when live tests
   are interrupted mid-run.
+
+### Session 30 — Sprint 28 (this session)
+- `intents.py`: phrase→action mapping onto the frozen 62-action space via
+  word-start regex (stems work; "ore" can't fire inside "more" — live-
+  found bug fixed with \b boundaries); `validate_action()` reuses the
+  sim's exact predicates read-only so accepted intents can't fail
+  "illegally"; telemetry counts mapped/unmapped/dropped with reasons.
+- `llm_agent.py`: `LLMDrivenAgent` — injected client, no inference in
+  decide() (S29 owns scheduling), queued intents REVALIDATED every tick
+  against current state ("stale_" drops), provider failure/garbage/
+  exception → pure RuleBasedAgent behavior. `attach_llm_agent()` keeps
+  index alignment in sim.agents.
+- Live smoke: llama3.1:8b drove a settlement 60 ticks — farm intent
+  executed, trade intent dropped (no_valid_trade_partner), timeouts
+  degraded to rules seamlessly. Fast suite: 362 passing.
+- **[DECISION] Intents are action IDs only**: frozen interface has no
+  positional args; handlers already pick optimal sites/targets, so
+  validation checks feasibility, not location legality.
+- **[DECISION] Re-validate queue every tick**: state drifts between
+  request and execution — a queued farm can go unaffordable.
+- **[WHY] Two independent legality layers**: validate_action pre-tick
+  AND the sim handler's own checks — no LLM output can break world rules.
 
 ---
 
