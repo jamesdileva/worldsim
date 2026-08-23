@@ -28,7 +28,8 @@ intent→validated-action agent, scheduled background reasoning, and a LIVE
 paired comparison showing LLM advice significantly improves
 territory/buildings/reward; sprint docs expanded through Phase 10),
 **Phase 6 in progress** (S31 technology & eras done; S32 market
-economies done; S33 highways/infrastructure done).
+economies done; S33 highways/infrastructure done; S34 treaties &
+federations done).
 
 **Test tiers:** `pytest` = fast suite (~250 tests, ~3–5 min);
 `pytest -m slow` = long integration runs.
@@ -75,6 +76,7 @@ economies done; S33 highways/infrastructure done).
 | `085e5e0` | 31 | Technology & eras: deterministic research, four-tech tree, era gates on Mine/Granary, Era III bonuses (**Phase 6 begins**) |
 | `a35048f` | 32 | Market economies: derived prices, valuation-gap trade direction, gap-scaled shipments |
 | `c8b6586` | 33 | Large-scale infrastructure: inter-settlement highway projects, pay-as-you-go segments, +30% trade bonus |
+| `aff5026` | 34 | Advanced diplomacy: treaties with clauses, derived federations, +15% intra-federation shipments |
 
 ---
 
@@ -480,6 +482,31 @@ Agents replace auto-rules; the frozen RL contract is born
   rate rather than discounting stone.
 - **Gotcha**: growing deserialize_world's return tuple breaks every
   explicit unpack — prefer `*_, last` or indexing in tests.
+
+### Session 36 — Sprint 34 (this session)
+- `treaties.py`: formal treaties with clauses — non_aggression (raids
+  blocked between parties at BOTH legality layers), trade_pact (+25%
+  shipments), tribute (wealthier→poorer every 100 ticks);
+  deterministic acceptance predicate; treaty-ONLY-tribute reserved for
+  victor-imposed terms.
+- Federations DERIVED: alliance-graph components with ≥3 members, pure
+  function of state (third application of the derived-state pattern:
+  eras, prices, federations). Members ship +15% to each other.
+- Rule hook `maybe_propose_treaties` cadence-gated per settlement;
+  summaries show "Treaties:" and "Federations:" lines; sim.treaties is
+  the 13th snapshot field (five more unpackings updated).
+- Live smoke on seed 42 @1500 ticks: all three settlements signed
+  pairwise trade+non-aggression treaties AND the derived federation
+  mechanism detected the mutual-alliance triangle → a real federation
+  formed. Fast suite: 450 passing.
+- **[DECISION] Federations derived, not stored**: components can never
+  disagree with the alliances they come from.
+- **[DECISION] Non-aggression beats military friction**: warlike
+  archetypes cannot raid treaty partners even when hostile — a signed
+  pact is stronger than personality.
+- **[DECISION] Tribute-only treaties need conflict**: friendly pairs
+  sign trade/non-aggression pacts; tribute imposition awaits S35
+  warfare. Mixed-clause treaties may include it.
 
 ---
 
