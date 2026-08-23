@@ -159,13 +159,18 @@ class RuinSite:
     """A collapsed settlement's remains (Sprint 5).
 
     Remembered so the site can spontaneously re-settle after 500 ticks and
-    grant 2x growth to settlements founded adjacent to the former capital."""
+    grant 2x growth to settlements founded adjacent to the former capital.
+    Sprint 36: ruins also remember the dead civilization's era and
+    technologies plus salvageable stockpiles for recovery."""
 
     settlement_id: str
     name: str
     spawn_x: int
     spawn_y: int
     collapse_tick: int
+    era: int = 1
+    technologies: list[str] = field(default_factory=list)
+    salvage: dict = field(default_factory=dict)
     id: str = field(default_factory=lambda: str(uuid.uuid4()))
 
 
@@ -945,12 +950,18 @@ class Simulation:
     # ------------------------------------------------------------------
 
     def _record_ruin(self, settlement: Settlement) -> RuinSite:
+        from .recovery import salvage_from
+
         ruin = RuinSite(
             settlement_id=settlement.id,
             name=f"Ruins of {settlement.name}",
             spawn_x=settlement.spawn_x,
             spawn_y=settlement.spawn_y,
             collapse_tick=self.tick,
+            # Sprint 36: enriched ruins carry forward knowledge + salvage.
+            era=settlement.era,
+            technologies=list(settlement.technologies),
+            salvage=salvage_from(settlement),
             # Deterministic id (resettle RNG hashes it).
             id=str(
                 uuid.uuid5(
@@ -1003,7 +1014,20 @@ class Simulation:
             created_at_tick=self.tick,
             ruin_origin=ruin.id,
         )
+        # Sprint 36: knowledge recovery — settlers inherit the ruined
+        # civilization's technologies and salvage its stockpiles.
+        settlement.technologies = list(ruin.technologies)
+        for resource, amount in ruin.salvage.items():
+            settlement.resource_inventory[resource] = (
+                settlement.resource_inventory.get(resource, 0.0) + amount)
         self._register_settlement(settlement, ruin_origin=ruin.id)
+        recovered = ", ".join(sorted(settlement.technologies)) or "nothing"
+        self.log_event(
+            "recovery",
+            [settlement.id],
+            f"{settlement.name} rose from the ruins of {ruin.name}; "
+            f"settlers recovered {recovered}",
+        )
         return settlement
 
     def _ruin_adjacent(self, settlement: Settlement) -> bool:
@@ -1574,6 +1598,10 @@ class Simulation:
             inv[res] = inv.get(res, 0.0) + amount
 
     def _kill(self, settlement: Settlement) -> RuinSite:
+        # Sprint 36: refugees flee to allies/federation before the end.
+        from .recovery import migrate_refugees
+
+        migrate_refugees(self, settlement)
         settlement.population = 0
         settlement.destroyed_at_tick = self.tick
         ruin = self._record_ruin(settlement)
@@ -1670,6 +1698,10 @@ class Simulation:
                 ):
                     settlement.negative_inventory_progress = 0
                     settlement.population -= 1
+                    # Sprint 36: prolonged neglect also strips a building.
+                    from .recovery import decay_building
+
+                    decay_building(self, settlement)
                     if not settlement.is_alive:
                         self._kill(settlement)
                         continue

@@ -742,6 +742,31 @@ history. Several items extend existing systems (diplomacy, collapse).
 | 36 | Collapse/recovery depth | Extends S5 ruins/happiness with era mechanics |
 | 37 | Long-term historical simulation | Stability + performance at 100k+ ticks |
 
+### Sprint 36 — Collapse/Recovery Depth (detailed)
+
+**Duration:** 1 week
+**Deliverable:** Era-aware collapse (enriched ruins, refugee migration,
+building decay) and knowledge recovery on re-settlement.
+
+**Tasks:**
+- `recovery.py`: `migrate_refugees` — up to half the dying population
+  flees to allies/federation members (federation first, deterministic
+  order, ≤3 pop absorbed per recipient), logged as "migration";
+  `salvage_from` — half of non-negative stockpiles; `decay_building` —
+  each scarcity-collapse event also strips one building (lowest-yield
+  deterministic target)
+- RuinSite enriched: records era, technologies, salvage; persisted via
+  encode/decode with backward-compatible defaults
+- Knowledge recovery: re-settlers inherit the ruin's technologies and
+  salvage, logged as a "recovery" event
+
+**Acceptance criteria:**
+- Deterministic migration/salvage/decay across identical seeds
+- Re-settled civilizations inherit knowledge + salvage (rebound faster
+  than they rose)
+- No migration without allies/federation; decay only under sustained
+  scarcity; frozen contract untouched
+
 ### Sprint 35 — Warfare Proper (detailed)
 
 **Duration:** 1 week

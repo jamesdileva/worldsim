@@ -5,6 +5,45 @@ Decisions worth remembering are marked **[DECISION]**.
 
 ---
 
+## Session 38 — 2026-08-23 — Sprint 36: Collapse/Recovery Depth
+
+**What was built**
+- `recovery.py`:
+  - Refugee migration: on death, up to half the final population flees
+    to allies/federation members (federation members first, sorted,
+    ≤3 pop absorbed per recipient), logged as "migration"
+  - Enriched ruins: RuinSite records era, technologies, and half of
+    non-negative stockpiles as salvage
+  - Knowledge recovery: re-settlers inherit the ruin's technologies and
+    salvage, logged as "recovery" — civilizations rebound faster than
+    they rose
+  - Building decay: every scarcity-collapse event (48-tick cadence)
+    also strips one building (lowest-yield deterministic target) —
+    decline hits people AND infrastructure together
+- RuinSite encode/decode extended with era/technologies/salvage
+  (backward-compatible .get defaults).
+- Live smoke: killed an Era-2 settlement with 3 techs — ruin captured
+  era/techs/salvage, ally absorbed 3 refugees, and the re-settled
+  civilization inherited all three technologies plus salvage.
+- 12 new tests. Fast suite: 478 passing.
+
+### Decisions
+
+- **[DECISION] Decay rides the collapse cadence**: stripping a building
+  alongside each population loss (48 ticks of scarcity) keeps one
+  counter and makes decline legible; a separate 200-tick decay track
+  could never fire because the collapse branch resets the counter.
+- **[DECISION] Per-recipient refugee cap**: each ally absorbs at most 3;
+  unabsorbed refugees vanish. Prevents single-ally instant booms.
+- **[WHY] Inherit technologies, not research points**: knowledge
+  persists in ruins; unfinished research does not. Recovery rewards
+  past achievement without erasing collapse cost.
+- **Test-design lesson**: production economics + market trade rescue
+  negative-stockpile scenarios within ticks — scarcity tests must drive
+  the counter directly or isolate from trade.
+
+---
+
 ## Session 37 — 2026-08-23 — Sprint 35: Warfare Proper
 
 **What was built**

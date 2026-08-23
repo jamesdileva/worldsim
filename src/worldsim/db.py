@@ -260,6 +260,9 @@ def _encode_ruin(r: RuinSite) -> dict:
         "spawn_x": r.spawn_x,
         "spawn_y": r.spawn_y,
         "collapse_tick": r.collapse_tick,
+        "era": getattr(r, "era", 1),
+        "technologies": list(getattr(r, "technologies", [])),
+        "salvage": dict(getattr(r, "salvage", {})),
     }
 
 
@@ -270,6 +273,9 @@ def _decode_ruin(obj: dict) -> RuinSite:
         spawn_x=obj["spawn_x"],
         spawn_y=obj["spawn_y"],
         collapse_tick=obj["collapse_tick"],
+        era=obj.get("era", 1),
+        technologies=list(obj.get("technologies", [])),
+        salvage=dict(obj.get("salvage", {})),
         id=obj["id"],
     )
 
