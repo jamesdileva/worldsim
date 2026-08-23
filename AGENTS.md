@@ -23,7 +23,8 @@ Stable-Baselines3 (PPO) + matplotlib + psutil + scipy.
 **Status:** Phase 1 ✅, Phase 2 ✅, Phase 3 ✅ (Sprints 12–18 + remediation;
 learning healthy in training metrics, eval metrics saturated), **Phase 4 in
 progress** (S19 populations, S20 mutation/elitism, S21 cross-generation
-learning done; sprint docs expanded through Phase 10).
+learning, S22 self-play head-to-head done; sprint docs expanded through
+Phase 10).
 
 **Test tiers:** `pytest` = fast suite (~250 tests, ~3–5 min);
 `pytest -m slow` = long integration runs.
@@ -58,6 +59,7 @@ learning done; sprint docs expanded through Phase 10).
 | `0a9f070` | 19 | Population manager, champion selection/promotion, lineage; sprint docs expanded through Phase 10 (**Phase 4 begins**) |
 | `aa0bd9d` | 20 | Weight mutation, elitism, mutant scoring via rollouts, lineage types, strategy-shift report |
 | `ed3b232` | 21 | Strategy-memory aggregation into population priors, failure-weighted curricula |
+| `fafb008` | 22 | Multi-controller self-play, head-to-head competition, competitive shares/metrics |
 
 ---
 
@@ -213,6 +215,24 @@ Agents replace auto-rules; the frozen RL contract is born
 - **[WHY] Curriculum = training worlds, not reward changes**: candidates
   that failed before train ON those worlds — targeted practice, no reward
   distortion.
+
+### Session 24 — Sprint 22 (this session)
+- `competition.py`: multi-controller runner — k policies each drive one
+  settlement in a shared world (simultaneous pre-tick actions; shared
+  mechanics via skip_agent_ids); per-controller survival/peak/reward +
+  territory/resource SHARES across controllers.
+- `rl compare --head-to-head`: true policy-vs-policy matches recorded in
+  training_runs with both generations filled.
+- **Key finding**: the Sprint 18 gen3r "regression" REVERSES under direct
+  competition — gen3r beats gen1r 3-1 head-to-head (reward 22.4 vs 6.2,
+  territory 65%/35%). Baseline-relative metrics were structurally blind to
+  this: saturation hides competitive dominance. Self-play measurement was
+  the missing instrument.
+- **[WHY] Simultaneous pre-tick execution**: no controller sees another's
+  move within a tick; cross-tick turn-order asymmetry documented and bounded
+  (~1.5 reward for same-model sanity runs).
+- **[WHY] Shares across controllers only**: bystander rule-based settlements
+  excluded from denominators so shares measure competitive balance.
 
 ---
 
