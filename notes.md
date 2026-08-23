@@ -5,6 +5,47 @@ Decisions worth remembering are marked **[DECISION]**.
 
 ---
 
+## Session 30 — 2026-08-23 — Sprint 28: LLM → Intent → Validated Actions
+
+**What was built**
+- `intents.py`:
+  - `PHRASE_RULES`: advice phrases → frozen action IDs via word-start
+    regex matching (stems like "agricultur" work; "ore" cannot fire
+    inside "more" — live-found bug, fixed with `\b` boundaries)
+  - `map_advice_to_actions()`: deduped, order-preserving, unmapped
+    phrases counted in telemetry, never fatal
+  - `validate_action()`: read-only legality reusing the exact sim
+    predicates (can_afford/find_building_site/can_establish_route/
+    raid cadence/wars_of) so an accepted intent cannot fail "illegally"
+- `llm_agent.py` — `LLMDrivenAgent(Agent)` + `attach_llm_agent()`:
+  - Injected client; NO inference inside decide() (S29 owns scheduling);
+    default refresh every 24 ticks when queue empty
+  - Queued intents REVALIDATED against current state every observe()
+    ("stale_" drop reasons); invalid intents fall back to rules that tick
+  - Provider None/failure/garbage/exception → pure RuleBasedAgent
+    behavior; 200-tick fallback episode verified alive
+- Live smoke: real llama3.1:8b drove a settlement 60 ticks — validated
+  farm build executed, trade intent correctly dropped
+  (no_valid_trade_partner), timeouts degraded to rules seamlessly.
+- 31 new tests. Fast suite: 362 passing.
+
+### Decisions
+
+- **[DECISION] Intents are action IDs only**: the frozen interface has no
+  positional args; sim handlers already pick optimal sites/targets.
+  Validation therefore checks feasibility (site exists, affordable),
+  not location legality.
+- **[DECISION] Re-validate queue every tick**: state drifts between
+  request and execution; a queued farm can go unaffordable. Stale drops
+  get distinct telemetry reasons.
+- **[DECISION] Word-start keyword matching**: substring matching made
+  "build more farms" map to BUILD_MINE ("more" ⊃ "ore"). `\b`+stem
+  prefixes fix it while keeping stem tolerance.
+- **[WHY] No LLM output can execute illegal actions**: two independent
+  layers — validate_action pre-tick AND the sim's own handler checks.
+
+---
+
 ## Session 29 — 2026-08-22 — Sprint 27: Strategic Reasoning
 
 **What was built**
