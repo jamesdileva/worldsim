@@ -5,6 +5,42 @@ Decisions worth remembering are marked **[DECISION]**.
 
 ---
 
+## Session 39 — 2026-08-23 — Sprint 37: Long-Term Historical Simulation
+
+**What was built**
+- Bounded memory at 100k+ ticks:
+  - event log capped at EVENT_LOG_MAX=20k, oldest dropped (events are
+    advisory/log-only — physics never depended on them)
+  - experience buffer capped at 50k rows (oldest dropped; callers
+    flushing to SQLite are unaffected at normal cadences)
+- Epoch history: `sim.history` records a compact record every 500 ticks
+  {tick, settlements_alive, total_population, wars_active,
+  routes_active, mean_happiness, prices} — ~200 records per 100k ticks,
+  pure function of state (byte-identical across identical sims)
+- Performance: `food_income`/`food_capacity` memoized per tick via the
+  existing `_cached` machinery
+- Slow-tier soak tests: 10k ticks in 66s (151 ticks/s → 100k ≈ 11 min);
+  traced memory growth 4.5 MB over warm ticks; total-collapse run keeps
+  ticking cleanly through the real _kill path (ruins + re-settlers
+  included); determinism verified at horizon.
+- Fast suite: 486 passing.
+
+### Decisions
+
+- **[DECISION] Events are droppable**: the advisory/log-only principle
+  (Phase 5) pays off — capping the log cannot change physics, so
+  bounding it is free stability.
+- **[DECISION] History is derived per epoch, not a journal**: compact
+  aggregate snapshots keep long-run analysis cheap without replaying
+  full logs.
+- **Test lesson: tracemalloc lies about speed** (~10x allocation
+  slowdown) — measure time untraced, memory in a separate traced pass.
+- **Soak test caught real behavior**: naive "starve them to death"
+  scenarios fail because production economics + market trade rescue
+  settlements — collapse tests must go through the real death path.
+
+---
+
 ## Session 38 — 2026-08-23 — Sprint 36: Collapse/Recovery Depth
 
 **What was built**

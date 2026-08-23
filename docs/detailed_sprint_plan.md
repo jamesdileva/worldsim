@@ -742,6 +742,31 @@ history. Several items extend existing systems (diplomacy, collapse).
 | 36 | Collapse/recovery depth | Extends S5 ruins/happiness with era mechanics |
 | 37 | Long-term historical simulation | Stability + performance at 100k+ ticks |
 
+### Sprint 37 — Long-Term Historical Simulation (detailed)
+
+**Duration:** 1 week
+**Deliverable:** Stability + performance at 100k+ ticks: bounded memory,
+epoch history, memoized hot paths, soak-tested.
+
+**Tasks:**
+- Bounded structures: event log caps at EVENT_LOG_MAX=20k (oldest
+  dropped; events are advisory/log-only so physics never depended on
+  them); experience buffer capped at 50k rows
+- Epoch history: every HISTORY_INTERVAL_TICKS=500 the sim records a
+  compact record {tick, settlements_alive, total_population,
+  wars_active, routes_active, mean_happiness, prices} — ~200 records
+  per 100k ticks
+- Performance: food_income/food_capacity memoized per tick via the
+  existing _cached machinery
+- Slow-tier soak tests: 10k ticks within a time budget, traced memory
+  growth bounded over warm ticks, total-collapse runs keep ticking,
+  byte-determinism at horizon
+
+**Acceptance criteria:**
+- ≥150 ticks/s on a 3-settlement size-64 world (100k ticks ≈ minutes)
+- Memory growth roughly flat once warm (<100 MB per 2k traced ticks)
+- Determinism preserved at horizon; frozen contract untouched
+
 ### Sprint 36 — Collapse/Recovery Depth (detailed)
 
 **Duration:** 1 week

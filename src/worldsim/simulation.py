@@ -102,6 +102,11 @@ RUIN_RESETTLE_MIN_AGE = 500
 RUIN_RESETTLE_CHANCE = 0.10
 RUIN_GROWTH_MULTIPLIER = 2
 
+# Long-horizon stability (Sprint 37): bounded memory at 100k+ ticks.
+EVENT_LOG_MAX = 20_000
+EXPERIENCE_BUFFER_MAX = 50_000
+HISTORY_INTERVAL_TICKS = 500
+
 # Competition (Sprint 9): neighbors, raids, contested zones, events.
 # Sprint 11: raised from 48 to 96 — sparse worlds left most settlements
 # unreachable, which starved trade/diplomacy (and thus strategy emergence).
@@ -231,6 +236,8 @@ class Simulation:
     # Sprint 34: formal treaties with clauses (non-aggression, trade
     # pact, tribute). Federations are derived, not stored.
     treaties: list = field(default_factory=list)
+    # Sprint 37: compact epoch history for long-run analysis.
+    history: list[dict] = field(default_factory=list)
 
     @property
     def tick(self) -> int:
@@ -1242,6 +1249,10 @@ class Simulation:
                 description=description,
             )
         )
+        # Sprint 37: bound memory at 100k+ ticks. Oldest events drop;
+        # events are advisory/log-only so physics never depended on them.
+        if len(self.event_log) > EVENT_LOG_MAX:
+            del self.event_log[: len(self.event_log) - EVENT_LOG_MAX]
 
     def neighbors_of(self, settlement: Settlement) -> list[Settlement]:
         """Settlements within spawn distance or territory contact.
@@ -1512,7 +1523,14 @@ class Simulation:
 
     def food_income(self, settlement: Settlement) -> float:
         """Terrain food yields + farm output (with raid debuffs) on owned
-        tiles. Era III grants +15% farm output (Sprint 31)."""
+        tiles. Era III grants +15% farm output (Sprint 31). Memoized per
+        tick (Sprint 37)."""
+        idx = self.settlements.index(settlement)
+        return self._cached(
+            ("foodinc", idx), lambda: self._compute_food_income(settlement)
+        )
+
+    def _compute_food_income(self, settlement: Settlement) -> float:
         idx = self.settlements.index(settlement)
         owned = self.world.ownership == idx
         income = float(self.world.food_yield_grid()[owned].sum())
@@ -1597,6 +1615,24 @@ class Simulation:
         for res, amount in produced.items():
             inv[res] = inv.get(res, 0.0) + amount
 
+    def _record_history_epoch(self) -> None:
+        """Append one compact epoch record (Sprint 37). Deterministic."""
+        living = [s for s in self.settlements if s.is_alive]
+        from .markets import market_prices
+
+        self.history.append({
+            "tick": self.tick,
+            "settlements_alive": len(living),
+            "total_population": sum(s.population for s in living),
+            "wars_active": len(self.diplomacy.wars),
+            "routes_active": len(self.active_routes()),
+            "mean_happiness": (
+                round(sum(s.happiness for s in living) / len(living), 4)
+                if living else 0.0
+            ),
+            "prices": market_prices(self),
+        })
+
     def _kill(self, settlement: Settlement) -> RuinSite:
         # Sprint 36: refugees flee to allies/federation before the end.
         from .recovery import migrate_refugees
@@ -1631,6 +1667,9 @@ class Simulation:
         ]
         if self.tick % EVENT_CHECK_INTERVAL_TICKS == 0:
             self._check_disasters()
+        # Sprint 37: compact epoch history (pure function of state).
+        if self.tick % HISTORY_INTERVAL_TICKS == 0:
+            self._record_history_epoch()
         skip = skip_agent_ids or set()
         for idx, settlement in enumerate(self.settlements):
             if not settlement.is_alive:
@@ -1816,6 +1855,11 @@ class Simulation:
                 False,
             )
         )
+        # Sprint 37: bound RAM at long horizons; oldest rows drop first.
+        if len(self.experience_buffer) > EXPERIENCE_BUFFER_MAX:
+            del self.experience_buffer[
+                : len(self.experience_buffer) - EXPERIENCE_BUFFER_MAX
+            ]
         # Sprint 11: strategy memory — EMA of reward per archetype/action.
         archetype = settlement.personality.get("archetype", "balanced")
         key = (archetype, int(prev_action))
