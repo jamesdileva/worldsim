@@ -397,6 +397,7 @@ def _autosave(store: WorldStore, args, sim: Simulation, world_id: str | None) ->
         diplomacy=sim.diplomacy,
         strategy_memory=sim.strategy_memory,
         highway_projects=sim.highway_projects,
+        treaties=sim.treaties,
     )
     return store.save_world_with_id(
         world_id if world_id is not None else str(uuid.uuid4()), sim.world, **kwargs

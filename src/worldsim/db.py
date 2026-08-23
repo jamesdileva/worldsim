@@ -1,4 +1,4 @@
-"""SQLite persistence: worlds and snapshots tables (architecture_detailed.md §24.1).
+"""SQLite persistence: worlds and snapshots tables (architecture_detailed.md ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â§24.1).
 
 World state is stored as compressed JSON snapshots. Tile arrays are serialized
 as base64-encoded raw bytes so round-trips are exact (byte-level determinism).
@@ -325,6 +325,30 @@ def _encode_highway(p) -> dict:
     }
 
 
+def _encode_treaty(t) -> dict:
+    return {
+        "id": t.id,
+        "party_a": t.party_a,
+        "party_b": t.party_b,
+        "clauses": list(t.clauses),
+        "start_tick": t.start_tick,
+        "expires_tick": t.expires_tick,
+    }
+
+
+def _decode_treaty(obj: dict):
+    from .treaties import Treaty
+
+    return Treaty(
+        party_a=obj["party_a"],
+        party_b=obj["party_b"],
+        clauses=list(obj.get("clauses", [])),
+        start_tick=obj.get("start_tick", 0),
+        expires_tick=obj.get("expires_tick", 0),
+        id=obj["id"],
+    )
+
+
 def _decode_highway(obj: dict):
     from .infrastructure import HighwayProject
 
@@ -353,6 +377,7 @@ def serialize_world(
     diplomacy: DiplomacyState | None = None,
     strategy_memory: dict | None = None,
     highway_projects: list | None = None,
+    treaties: list | None = None,
 ) -> str:
     state = {
         "seed": world.seed,
@@ -392,6 +417,7 @@ def serialize_world(
         "highway_projects": [
             _encode_highway(p) for p in (highway_projects or [])
         ],
+        "treaties": [_encode_treaty(t) for t in (treaties or [])],
     }
     return json.dumps(state, sort_keys=True)
 
@@ -456,6 +482,7 @@ def deserialize_world(
     highway_projects = [
         _decode_highway(obj) for obj in state.get("highway_projects", [])
     ]
+    treaties = [_decode_treaty(obj) for obj in state.get("treaties", [])]
     return (
         world,
         settlements,
@@ -469,6 +496,7 @@ def deserialize_world(
         diplomacy,
         strategy_memory,
         highway_projects,
+        treaties,
     )
 
 
@@ -509,6 +537,7 @@ class WorldStore:
         diplomacy: DiplomacyState | None = None,
         strategy_memory: dict | None = None,
         highway_projects: list | None = None,
+        treaties: list | None = None,
     ) -> str:
         """Insert a world row, write a snapshot, and upsert settlement,
         resource, and trade-route rows."""
@@ -538,6 +567,7 @@ class WorldStore:
                         diplomacy,
                         strategy_memory,
                         highway_projects,
+                        treaties,
                     ),
                 ),
             )
@@ -644,6 +674,7 @@ class WorldStore:
         diplomacy: DiplomacyState | None = None,
         strategy_memory: dict | None = None,
         highway_projects: list | None = None,
+        treaties: list | None = None,
     ) -> str:
         """Save under a caller-chosen id (upsert)."""
         if self.world_exists(world_id):
@@ -661,6 +692,7 @@ class WorldStore:
                 diplomacy=diplomacy,
                 strategy_memory=strategy_memory,
                 highway_projects=highway_projects,
+                treaties=treaties,
             )
             return world_id
         created_at = datetime.now(timezone.utc).isoformat()
@@ -687,6 +719,7 @@ class WorldStore:
                         diplomacy,
                         strategy_memory,
                         highway_projects,
+                        treaties,
                     ),
                 ),
             )
@@ -743,6 +776,7 @@ class WorldStore:
         diplomacy: DiplomacyState | None = None,
         strategy_memory: dict | None = None,
         highway_projects: list | None = None,
+        treaties: list | None = None,
     ) -> None:
         """Write a new snapshot for an existing world and bump last_tick."""
         if not self.world_exists(world_id):
@@ -771,6 +805,7 @@ class WorldStore:
                         diplomacy,
                         strategy_memory,
                         highway_projects,
+                        treaties,
                     ),
                 ),
             )

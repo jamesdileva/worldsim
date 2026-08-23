@@ -85,9 +85,13 @@ names: `betsim` → `Betsim`). Matching is **case-sensitive**:
   gate fails loudly on mismatches — run it before committing:
 
 ```bash
-<venv-python> -c "from app.testers.features import FEATURES; \
-print('Betsim' in FEATURES)"
+<venv-python> -c "from app.testers import TESTERS; \
+from app.testers.features import FEATURES; \
+print('Card-Game' in TESTERS, 'Card-Game' in FEATURES)"
 ```
+
+(Tester-only integrations like Surfhop legitimately print False for
+FEATURES; feature-only ones like Betsim print False for TESTERS.)
 
 Also purge test-junk rows occasionally — Tier tests create Project rows in
 pytest temp dirs and leave them behind (children first, FK-safe).
@@ -147,3 +151,99 @@ Verified ground truth (<date>):
 - cleanup: taskkill /IM <App>.exe /T
 - sandbox notes: <first-run state, hermetic DB, etc.>
 ```
+
+---
+
+## 9. Velocity (Godot) integration notes
+
+First non-node integration. Godot projects have no lockfile/manifest, so a
+**shim `package.json`** carries the canonical commands; all of them route
+through `tools\godot.cmd`, a locator wrapper resolving the engine exe in
+order: `GODOT_EXE` env var → `godot` on PATH → newest winget install.
+
+Verified ground truth (2026-08-22):
+
+- launch: `tools\godot.cmd --path . -- --smoke` boots the real main menu,
+  self-drives into the configured map (`--smoke-map=<id>`, default
+  beginner), simulates ~8s of gameplay input, then **exits itself**
+  (`RESULT=OK` + exit 0). Milestones are printed to stdout (live, per stage)
+  and written to `%TEMP%\velocity_smoke.log`.
+- stages emitted by the game: `MENU_SHOWN → MAP_SELECT_SHOWN →
+  SETTINGS_SHOWN → MAP_LOAD_STARTED → PLAYER_SPAWNED → RUN_STARTED →
+  GAMEPLAY_OK` (player must move >50u or the run fails). The tester gates
+  on a subset — `MENU_SHOWN`, `MAP_SELECT_SHOWN`, `SETTINGS_SHOWN`,
+  `RUN_STARTED`, then `RESULT=OK` (GAMEPLAY_OK implied) — check
+  surfhop.py before assuming any marker is a test gate.
+- stage screenshots: the game dumps its own framebuffer per stage to
+  `%TEMP%\velocity_smoke_<stage>.png` (menu / map_select / settings /
+  gameplay at run+4s; skipped headless) — immune to window-capture blanking
+  and app-log tail lag. The tester registers these after RESULT and takes
+  one live PrintWindow shot of the hold window as a sanity capture.
+- port: none (single-process game; no backend).
+- fallback: `--smoke-headless` script adds `--headless` for CI-style passes
+  without rendering.
+- cleanup: process exits by itself; if tree-killed, image name is the
+  Godot engine exe (`Godot_v*.exe`) — `taskkill /IM Godot_v4.7.2-stable_win64.exe /T`,
+  not the project name.
+- sandbox notes: first-run state writes `user://save/settings.cfg` on this
+  account (harmless); achievements unlock locally during smoke runs.
+
+Command contract:
+
+| Sentinel command | String | Pass condition |
+|---|---|---|
+| test | `tools\godot.cmd --headless --path . --script res://tests/test_runner.gd` | exit 0, stdout contains `ALL TESTS PASSED`, zero ERROR lines |
+| start | `tools\godot.cmd --path . -- --smoke` | exit 0, `[smoke] RESULT=OK` |
+| build | `tools\godot.cmd --headless --path . --editor --quit` | exit 0 |
+
+Preflight results (2026-08-22): test ✅ 406 checks · start ✅ windowed +
+headless · build ✅ · packaged-exe layout ⏳ deferred to release export
+(target `dist/win-unpacked/`). DOM feature-testers are N/A — no CDP/DOM in
+Godot; the smoke mode replaces click-through assertions.
+
+### Lessons from live Sentinel integration (2026-08-23)
+
+Findings from wiring the custom "Velocity smoke" tester end-to-end; kept here
+because they generalize to any Godot project in Sentinel:
+
+- **Stale persisted commands**: a project row caches `stack.commands` from
+  extraction time; later `package.json` edits do NOT propagate (build/open
+  self-heal via live rediscovery, testers don't). Custom testers must re-read
+  the shim per run (surfhop.py does), or restart the backend after manifest
+  edits.
+- **Restart after code changes**: uvicorn loads tester modules at import time;
+  editing a tester requires killing the 8420 listener and relaunching before
+  API-triggered runs pick it up.
+- **Scheduler starvation**: job pool is `ThreadPoolExecutor(pool_size=2)` with
+  no watchdog — one wedged subprocess blocks all future jobs until restart.
+  Stale buildlog rows stuck at "running" used to survive restarts and
+  re-stick the Builds tab on "Working…" forever; since 2026-08-23 a startup
+  sweep marks orphaned rows failed (`BuildLogRepository.mark_orphaned_as_failed()`,
+  wired into the lifespan), so every restart self-heals all projects.
+- **API route gotcha**: `/api/v1/projects` without a trailing slash silently
+  falls through to the SPA catch-all and returns HTML. Prefer direct SQLite
+  reads over PowerShell JSON parsing for verification.
+- **Window capture on Godot**: exe-path window matching can't see the engine
+  (winget installs under a versioned package dir); match by title (`^Velocity`)
+  instead.
+- **PrintWindow blanking**: GPU-composited 3D content intermittently captures
+  black via PrintWindow; surfhop.py falls back to an ImageGrab screen crop of
+  the window rect when frames come back blank.
+- **Screenshot timing needs engine cooperation**: milestones printed only at
+  run end, so every log gate fired ~30s late and shots photographed the wrong
+  stage (menu shot caught mid-map gameplay). Fix shipped in-game: markers now
+  print LIVE per stage plus a `RUN_STARTED` marker; `--smoke-stage-pause=<s>`
+  dwells on menu/load/spawn so capture photographs the actual stage;
+  `--smoke-hold=<s>` keeps the window alive after RESULT for post-pass shots.
+- **Log-gate lag makes timed external captures unreliable**: even with live
+  markers, app-log tail lag (seconds) means a gate-then-shoot pattern lands
+  after the game moved on — map_select shots caught the settings overlay,
+  settings shots caught the map load. Definitive fix: the GAME dumps its own
+  framebuffer per stage (`_smoke_capture`, awaited so it photographs the
+  current stage, skipped headless) and the tester registers the PNGs after
+  RESULT. External window capture is now only the post-pass hold shot.
+  Corollary: fire-and-forget capture coroutines photograph the NEXT stage —
+  always await them.
+- Verified end state: session PASSED with five correctly-labeled screenshots
+  (main menu / map select / settings / mid-run motion at speed / post-run
+  hold frame).

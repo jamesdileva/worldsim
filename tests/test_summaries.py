@@ -35,6 +35,8 @@ class StubRelations:
 
 
 class StubDiplomacy:
+    alliances = set()
+
     def rep(self, sid):
         return -7.5
 
@@ -64,6 +66,7 @@ class StubSim:
         self.event_log = []
         self.settlements = []
         self.highway_projects = []
+        self.treaties = []
         self._buildings = {}
         self._territory = {}
         self._neighbors = {}

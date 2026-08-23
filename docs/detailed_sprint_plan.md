@@ -742,6 +742,36 @@ history. Several items extend existing systems (diplomacy, collapse).
 | 36 | Collapse/recovery depth | Extends S5 ruins/happiness with era mechanics |
 | 37 | Long-term historical simulation | Stability + performance at 100k+ ticks |
 
+### Sprint 34 — Advanced Diplomacy (detailed)
+
+**Duration:** 1 week
+**Deliverable:** Formal treaties carrying clauses; federations as
+derived objects over the alliance graph.
+
+**Tasks:**
+- `treaties.py`: `Treaty` dataclass (uuid5 ids, clauses list, expiry);
+  three clause types — non_aggression (raids blocked between parties,
+  enforced in `_raidable_targets` AND the intent validator), trade_pact
+  (+25% shipments), tribute (wealthier party pays the poorer every 100
+  ticks); deterministic acceptance predicate (alive, not at war,
+  relation ≥ friendly threshold, no existing treaty); tribute-ONLY
+  treaties reserved for victor-imposed terms
+- Federations DERIVED: connected components of the alliance graph with
+  ≥3 members — pure function of state, nothing persisted; members ship
+  +15% to each other
+- Rule hook: cadence-gated `maybe_propose_treaties` per settlement
+  (Era II+, best-scoring friendly neighbor without a treaty)
+- Persistence: sim.treaties serialized (13th snapshot field); summaries
+  gain "Treaties:" and "Federations:" lines
+
+**Acceptance criteria:**
+- Deterministic ids/acceptance/expiry across identical seeds
+- Non-aggression blocks raids at BOTH legality layers with distinct
+  telemetry reason
+- Trade pacts and federations measurably boost shipments; tribute moves
+  resources richer→poorer on period boundaries
+- Save/load round-trips treaties exactly; frozen contract untouched
+
 ### Sprint 33 — Large-Scale Infrastructure (detailed)
 
 **Duration:** 1 week

@@ -119,6 +119,24 @@ def summarize_world(sim, tier: str = TIER_FULL,
         f"construction"
     )
 
+    from .treaties import federations
+
+    name_by_id = {s.id: s.name for s in sim.settlements}
+    treaty_parts = sorted(
+        f"{name_by_id.get(t.party_a, UNKNOWN)}-{name_by_id.get(t.party_b, UNKNOWN)}"
+        f"({'+'.join(sorted(t.clauses))})"
+        for t in sim.treaties
+    )
+    sections.append(
+        f"Treaties ({len(sim.treaties)}): "
+        + (", ".join(treaty_parts) or "none")
+    )
+    fed_parts = [
+        "+".join(sorted(name_by_id.get(sid, UNKNOWN) for sid in fed))
+        for fed in federations(sim)
+    ]
+    sections.append("Federations: " + (", ".join(fed_parts) or "none"))
+
     wars = _war_lines(sim)
     if wars:
         sections.append("Wars: " + "; ".join(wars))

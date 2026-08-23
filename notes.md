@@ -5,6 +5,47 @@ Decisions worth remembering are marked **[DECISION]**.
 
 ---
 
+## Session 36 — 2026-08-23 — Sprint 34: Advanced Diplomacy
+
+**What was built**
+- `treaties.py`: formal treaties with clauses —
+  - `Treaty` dataclass (uuid5 ids, clauses list, TREATY_DURATION=1000)
+  - non_aggression (raids blocked between parties), trade_pact (+25%
+    shipments), tribute (wealthier→poorer stockpiles every 100 ticks)
+  - Deterministic acceptance: alive, not at war, relation ≥ friendly
+    threshold, no existing treaty; tribute-ONLY treaties reserved for
+    victor-imposed terms (S35 warfare will impose them)
+- Federations DERIVED from the alliance graph (components ≥3 members) —
+  pure function of state like eras/prices; members ship +15% to each
+  other. Nothing persisted, nothing to desynchronize.
+- Rule hook `maybe_propose_treaties`: cadence-gated per settlement
+  (Era II+, best-scoring friendly neighbor without a treaty).
+- Enforcement at both layers: `_raidable_targets` excludes treaty
+  partners; intent validator drops raids with
+  `non_aggression_treaty` reason.
+- Persistence: sim.treaties = 13th snapshot field; summaries show
+  "Treaties:" and "Federations:" lines.
+- Live smoke on seed 42 @1500 ticks: all three settlements signed
+  pairwise trade+non-aggression treaties AND the derived federation
+  mechanism detected the mutual-alliance triangle → a real federation.
+- 20 new tests. Fast suite: 450 passing.
+
+### Decisions
+
+- **[DECISION] Federations derived, not stored**: third application of
+  the derived-state pattern (eras, prices, now federations) — alliance
+  graph components can never disagree with the alliances they come from.
+- **[DECISION] Non-aggression beats military friction**: warlike
+  military archetypes can no longer raid treaty partners even when
+  hostile — a signed pact is stronger than personality.
+- **[DECISION] Tribute-only treaties need conflict**: friendly pairs
+  sign trade/non-aggression pacts; imposing tribute requires victory
+  (arrives with S35 warfare). Mixed-clause treaties may include it.
+- **[DECISION] Wealthier party pays the poorer** (tribute): reparations
+  flow downhill; deterministic tie-break by id on equal wealth.
+
+---
+
 ## Session 35 — 2026-08-23 — Sprint 33: Large-Scale Infrastructure
 
 **What was built**

@@ -61,6 +61,7 @@ from .settlement import (
     assign_personality,
     Settlement,
 )
+from .treaties import TREATY_PROPOSAL_CADENCE_TICKS
 from .tiles import TERRAIN_PROFILES, TerrainType
 from .world import UNOWNED, World
 
@@ -222,6 +223,9 @@ class Simulation:
     gather_mult: float = 1.0
     # Sprint 33: inter-settlement highway construction projects.
     highway_projects: list = field(default_factory=list)
+    # Sprint 34: formal treaties with clauses (non-aggression, trade
+    # pact, tribute). Federations are derived, not stored.
+    treaties: list = field(default_factory=list)
 
     @property
     def tick(self) -> int:
@@ -776,8 +780,14 @@ class Simulation:
         if units < 0.5:
             return
         from .infrastructure import highway_trade_multiplier
+        from .treaties import (
+            federation_shipment_multiplier,
+            pact_shipment_multiplier,
+        )
 
         units *= highway_trade_multiplier(self, donor.id, receiver.id)
+        units *= pact_shipment_multiplier(self, donor.id, receiver.id)
+        units *= federation_shipment_multiplier(self, donor.id, receiver.id)
         if best_resource == "food":
             donor.food_stock -= units
             receiver.food_stock += units
@@ -1267,12 +1277,18 @@ class Simulation:
         neutral neighbors (aggression creates hostility)."""
         warlike = self._is_warlike_military(attacker)
         targets: dict[str, list[tuple[int, int]]] = {}
+        from .treaties import CLAUSE_NON_AGGRESSION, has_clause
+
         for neighbor in self.neighbors_of(attacker):
             hostile = self.relations.is_hostile(attacker.id, neighbor.id)
             if not hostile and not (
                 warlike and not self.diplomacy.is_allied(attacker.id, neighbor.id)
             ):
                 continue
+            if has_clause(
+                self, attacker.id, neighbor.id, CLAUSE_NON_AGGRESSION
+            ):
+                continue  # treaty floor beats even military friction
             idx = self.settlements.index(neighbor)
             improved = np.argwhere(
                 np.logical_and(
@@ -1568,6 +1584,10 @@ class Simulation:
             if not settlement.is_in_scarcity or self.tick % 2 == 0:
                 self._process_build_queue(settlement)
             self._advance_research(settlement)
+            if self.tick % TREATY_PROPOSAL_CADENCE_TICKS == 0:
+                from .treaties import maybe_propose_treaties
+
+                maybe_propose_treaties(self, settlement)
             self._produce_resources(settlement)
             income = self.food_income(settlement) * self._drought_multiplier(
                 settlement
@@ -1613,6 +1633,11 @@ class Simulation:
         from .infrastructure import advance_projects
 
         advance_projects(self)
+        # Treaty upkeep: expiry + periodic tribute (Sprint 34).
+        from .treaties import apply_tribute, expire_treaties
+
+        expire_treaties(self)
+        apply_tribute(self)
         # Trade: transfer every tick (route establishment is agent-driven).
         for route in self.trade_routes:
             if route.active:
@@ -1771,6 +1796,7 @@ def simulation_from_state(
     diplomacy: DiplomacyState | None = None,
     strategy_memory: dict | None = None,
     highway_projects: list | None = None,
+    treaties: list | None = None,
 ) -> Simulation:
     """Rebuild a Simulation from deserialized snapshot state (Sprint 6).
 
@@ -1789,6 +1815,7 @@ def simulation_from_state(
         diplomacy=diplomacy if diplomacy is not None else DiplomacyState(),
         strategy_memory=strategy_memory or {},
         highway_projects=highway_projects or [],
+        treaties=treaties or [],
     )
     sim.agents = [
         RuleBasedAgent(world.seed, idx) for idx in range(len(settlements))

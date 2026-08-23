@@ -145,11 +145,22 @@ def validate_action(sim, settlement: Settlement,
         return True, ""
 
     if action_id == Action.INITIATE_RAID:
+        from .treaties import CLAUSE_NON_AGGRESSION, has_clause
+
         last = sim.last_raid_tick.get(settlement.id)
         tick = sim.tick
         if last is not None and tick - last < RAID_CADENCE_TICKS:
             return False, "raid_cadence"
-        if not sim._raidable_targets(settlement):
+        raidable = sim._raidable_targets(settlement)
+        if not raidable:
+            # Distinguish "blocked by treaty" from "no targets" for
+            # telemetry clarity (the sim-side filter already excludes
+            # non-aggression partners from _raidable_targets).
+            for other in sim.neighbors_of(settlement):
+                if other.is_alive and has_clause(
+                    sim, settlement.id, other.id, CLAUSE_NON_AGGRESSION
+                ):
+                    return False, "non_aggression_treaty"
             return False, "no_raidable_targets"
         return True, ""
 
