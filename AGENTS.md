@@ -27,9 +27,11 @@ COMPLETE (S25–30: Ollama client, summarization, strategic reasoning,
 intent→validated-action agent, scheduled background reasoning, and a LIVE
 paired comparison showing LLM advice significantly improves
 territory/buildings/reward; sprint docs expanded through Phase 10),
-**Phase 6 in progress** (S31 technology & eras, S32 market economies,
-S33 highways/infrastructure, S34 treaties & federations, S35 warfare
-done; S36 collapse/recovery depth done).
+**Phase 6 ✅ COMPLETE** (S31 technology & eras, S32 market economies,
+S33 highways/infrastructure, S34 treaties & federations, S35 warfare,
+S36 collapse/recovery depth, S37 long-horizon stability: 100k ticks ≈
+11 min at 151 tps with bounded memory; sprint docs expanded through
+Phase 10).
 
 **Test tiers:** `pytest` = fast suite (~250 tests, ~3–5 min);
 `pytest -m slow` = long integration runs.
@@ -79,6 +81,7 @@ done; S36 collapse/recovery depth done).
 | `aff5026` | 34 | Advanced diplomacy: treaties with clauses, derived federations, +15% intra-federation shipments |
 | `db6372a` | 35 | Warfare: armies/forts/sieges, wired military action slots, deterministic battles, victor-imposed tribute treaties |
 | `77acc2e` | 36 | Collapse/recovery depth: enriched ruins, refugee migration, knowledge recovery on re-settlement, building decay |
+| `3a0af35` | 37 | Long-horizon stability: bounded logs, epoch history, memoized food math, soak tests (**Phase 6 complete**) |
 
 ---
 
@@ -552,6 +555,22 @@ Agents replace auto-rules; the frozen RL contract is born
 - **Test-design lesson**: production economics + market trade rescue
   negative-stockpile scenarios within ticks — scarcity tests must drive
   the counter directly or isolate from trade.
+
+### Session 39 — Sprint 37 (this session)
+- Long-horizon stability: event log capped at 20k / experience buffer
+  at 50k rows (oldest dropped; events are advisory so physics never
+  depended on them); `sim.history` records compact epoch records every
+  500 ticks (~200 per 100k ticks, byte-identical across identical sims);
+  food_income/food_capacity memoized per tick.
+- Soak (slow tier): 10k ticks in 66s = 151 ticks/s → **100k ticks ≈ 11
+  minutes**; traced memory growth 4.5 MB over warm ticks; total-collapse
+  run keeps ticking through the real _kill path; determinism verified.
+- Fast suite: 486 passing.
+- **[DECISION] Events are droppable**: the Phase 5 advisory-only
+  principle makes bounding the log free stability — capping cannot
+  change physics.
+- **Test lesson: tracemalloc lies about speed** (~10x allocation
+  slowdown) — measure time untraced, memory in a separate traced pass.
 
 ---
 
