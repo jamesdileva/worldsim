@@ -28,7 +28,7 @@ intent→validated-action agent, scheduled background reasoning, and a LIVE
 paired comparison showing LLM advice significantly improves
 territory/buildings/reward; sprint docs expanded through Phase 10),
 **Phase 6 in progress** (S31 technology & eras done; S32 market
-economies done).
+economies done; S33 highways/infrastructure done).
 
 **Test tiers:** `pytest` = fast suite (~250 tests, ~3–5 min);
 `pytest -m slow` = long integration runs.
@@ -74,6 +74,7 @@ economies done).
 | `8784814` | 30 | Paired LLM-vs-rulebased comparison, Wilcoxon+permutation, llm compare CLI; live verdict: advice helps (**Phase 5 complete**) |
 | `085e5e0` | 31 | Technology & eras: deterministic research, four-tech tree, era gates on Mine/Granary, Era III bonuses (**Phase 6 begins**) |
 | `a35048f` | 32 | Market economies: derived prices, valuation-gap trade direction, gap-scaled shipments |
+| `c8b6586` | 33 | Large-scale infrastructure: inter-settlement highway projects, pay-as-you-go segments, +30% trade bonus |
 
 ---
 
@@ -458,6 +459,27 @@ Agents replace auto-rules; the frozen RL contract is born
   organization that legitimately exceeds it.
 - **[DECISION] Direction by valuation gap, not raw surplus**: raw
   differences ignore need; gaps route goods toward desperation.
+
+### Session 35 — Sprint 33 (this session)
+- `infrastructure.py`: inter-settlement highways — deterministic uuid5
+  ids, L-shaped spawn-to-spawn paths skipping water/existing roads,
+  Era II masonry gate, territory-adjacency requirement, one per pair;
+  pay-as-you-go construction (stone/segment/tick), PAUSE-not-cancel
+  when unfunded, progressive road laying; Era III sponsors lay 2×.
+- Effect: +30% shipments on routes between completed-highway endpoints.
+- Rule hook: `_auto_road_rule` falls through to highway sponsorship when
+  own network saturates — all agent types benefit without new actions.
+- Persistence: serialize/deserialize gained a 12th tuple element
+  (highway_projects); five explicit unpackings updated across cli/tests.
+- Live: Brazemi sponsored and completed a 28-segment highway by tick
+  1200 on seed 42. Fast suite: 430 passing in both pytest-randomly
+  orders.
+- **[DECISION] Pause-don't-cancel**: funding gaps are temporary;
+  cancelling wastes paid segments. Resumes when stone returns.
+- **[DECISION] Era III speed not cost**: administration doubles lay
+  rate rather than discounting stone.
+- **Gotcha**: growing deserialize_world's return tuple breaks every
+  explicit unpack — prefer `*_, last` or indexing in tests.
 
 ---
 
