@@ -23,8 +23,9 @@ Stable-Baselines3 (PPO) + matplotlib + psutil + scipy + Ollama
 
 **Status:** Phase 1 ✅, Phase 2 ✅, Phase 3 ✅ (Sprints 12–18 + remediation;
 learning healthy in training metrics, eval metrics saturated), **Phase 5 in
-progress** (Phase 4 ✅ COMPLETE: S19–24; S25 Ollama integration done; S26
-state summarization done; sprint docs expanded through Phase 10).
+progress** (Phase 4 ✅ COMPLETE: S19–24; S25 Ollama integration, S26 state
+summarization, S27 strategic reasoning done; sprint docs expanded through
+Phase 10).
 
 **Test tiers:** `pytest` = fast suite (~250 tests, ~3–5 min);
 `pytest -m slow` = long integration runs.
@@ -64,6 +65,7 @@ state summarization done; sprint docs expanded through Phase 10).
 | `847624a` | 24 | RewardGuard ladder (WARN/PENALIZE/QUARANTINE), selection quarantine, exploit regression suite (**Phase 4 complete**) |
 | `43297e8` | 25 | Ollama integration: zero-dep urllib client, graceful degradation, config precedence, llm status/ask CLI (**Phase 5 begins**) |
 | `045ac39` | 26 | Settlement/world state summarization: deterministic token-budgeted tiny/full prompt views |
+| `86cec92` | 27 | Strategic reasoning: JSON advice prompts + strict parser, never-raise advise(), advisory log |
 
 ---
 
@@ -311,6 +313,26 @@ Agents replace auto-rules; the frozen RL contract is born
   names only.
 - **[WHY] Stub-based format pins**: pins against a live sim would couple
   tests to world dynamics — stubs pin formats, real sims pin determinism.
+
+### Session 29 — Sprint 27 (this session)
+- `advice.py`: advisor system prompt + user template (strict JSON-only
+  output contract); `parse_advice()` tolerates fences/chatter around the
+  JSON but validates types strictly inside it; `advise(client, summary)`
+  never raises — server failure passes through, garbage becomes
+  "unparseable model output"; `AdviceLog` jsonl side channel.
+- Advisory-only enforced: nothing executes or touches sim physics.
+- 23 new tests incl. live-gated slow test enforcing >=90% parseability on
+  real llama3.1:8b across 10 seeds x 2 settlements — passed in 4m30s after
+  server restart. Fast suite: 331 passing.
+- **[WHY] Strict-parse, degrade-loud**: malformed advice is a first-class
+  outcome (ok=False + error), not an exception — Sprint 28's intent→action
+  validation layer builds on this exact contract.
+- **[WHY] Tolerant shell, intolerant core**: markdown fences/assistant
+  chatter around JSON are stripped; inside the object types must be exact.
+- **Ops finding**: an aborted live-test run wedged Ollama's sequential
+  request queue (/api/tags healthy, generation hung forever, CLI spinner
+  produced no tokens). Restart fixed it; worth remembering when live tests
+  are interrupted mid-run.
 
 ---
 
