@@ -20,6 +20,8 @@ import numpy as np
 from .actions import NUM_ACTIONS
 from .agents import OBSERVATION_DIM, observe_vector
 from .rewards import (
+    REWARD_PENALTY_SCALE,
+    RewardGuard,
     RewardHackingDetector,
     RewardWeights,
     RollingNormalizer,
@@ -90,6 +92,7 @@ class WorldSimEnv(gym.Env):
         self.replay_buffer = ReplayBuffer(capacity=replay_capacity, seed=seed)
         self.normalizer = RollingNormalizer()
         self.hacking_detector = RewardHackingDetector()
+        self.reward_guard = RewardGuard(self.hacking_detector)
         self.reward_history: list[float] = []
         self._last_action: int | None = None
         self._repeat_count = 0
@@ -177,7 +180,13 @@ class WorldSimEnv(gym.Env):
         reward = float(max(-1.0, min(1.0, total_of(components))))
         self.normalizer.record(reward)
         self.reward_history.append(reward)
-        flagged = self.hacking_detector.record(self.sim.tick, components)
+        # Sprint 24: guard escalation (WARN -> PENALIZE -> QUARANTINE).
+        guard_level, reward_scale = self.reward_guard.record(
+            self.sim.tick, components
+        )
+        if reward_scale != 1.0:
+            reward = float(max(-1.0, min(1.0, reward * reward_scale)))
+        flagged = guard_level >= 1
         self._prev = snapshot(self.controlled, now_buildings)
         self._prev_population = self.controlled.population
 
@@ -199,5 +208,7 @@ class WorldSimEnv(gym.Env):
             "reward_normalized": self.normalizer.normalize(reward),
             "hacking_flag": flagged,
             "hacking_source": self.hacking_detector.dominant_source(),
+            "guard_level": guard_level,
+            "quarantined": self.reward_guard.quarantined_at_tick is not None,
         }
         return next_obs, reward, bool(terminated), bool(truncated), info

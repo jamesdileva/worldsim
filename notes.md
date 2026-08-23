@@ -5,6 +5,63 @@ Decisions worth remembering are marked **[DECISION]**.
 
 ---
 
+## Session 26 — 2026-08-20 — Sprint 24: Anti-Reward-Hacking Systems (Phase 4 complete!)
+
+**What was built**
+- `rewards.py` — `RewardGuard`: escalating response ladder on top of
+  Sprint 13's detector:
+  - OK → WARN (detector flagged) → PENALIZE (flagged ≥100 ticks; reward
+    scaled ×0.5) → QUARANTINE (penalized ≥200 more; excluded from
+    selection); clean ticks de-escalate gradually
+- `env.py` — guard drives penalized rewards in step(); info gains
+  `guard_level` + `quarantined`
+- `population.py` — `quick_eval_guarded()` scores candidates AND assesses
+  hacking over the rollout; quarantined candidates excluded from champion
+  selection (kept registered for forensics); mass-quarantine logged
+- `training.py` — `_run_policy` collects hacking telemetry (flagged ticks,
+  quarantined runs); surfaced per-generation in `rl dashboard`
+- Exploit regression suite (`tests/test_hacking.py`, slow tier):
+  route-farming, granary spam (Sprint 11's exploit), alternator (dodges
+  redundant-action shaping), synthetic exploiter → QUARANTINE
+- Tests: 7 new. Fast suite: 282 passing; slow: 4 hacking replays.
+
+### Decisions
+
+- **[DECISION] De-escalation is gradual** (−5 flagged ticks / −2 penalized
+  ticks per clean tick): a single lucky clean tick can't reset an active
+  response, but genuine reform recovers.
+- **[DECISION] Quarantined candidates stay registered**: forensics value;
+  only SELECTION excludes them.
+- **[DECISION] Fallback if all candidates quarantined**: return highest-
+  scorer anyway (caller logs mass quarantine) — evolution limps forward
+  rather than crashing.
+- **[DECISION] Detector measures component shares, not action repetition**:
+  the alternator exploit test proves action-shaping evasion can't hide
+  single-source reward dominance.
+
+### Gotchas
+
+- RewardGuard stored `dominant_source` as an attribute, shadowing the
+  detector method call ('str' object is not callable) — renamed to
+  `last_dominant_source` + delegating method.
+- Guard's detector has a 200-tick track-record warm-up before flagging:
+  ladder unit tests use a short-warmup detector to test mechanics directly.
+
+### Acceptance status
+
+- ✅ Synthetic exploiter automatically escalates to QUARANTINE (route-farm
+  replay, 600 ticks)
+- ✅ Known-exploit replays fail loudly if detection/penalization/quarantine
+  regresses (slow tier)
+- ✅ Telemetry in dashboard output per generation
+
+### PHASE 4 COMPLETE
+
+Populations ✓ mutation/elitism ✓ cross-generation learning ✓ self-play ✓
+strategy discovery ✓ anti-hacking defense ✓.
+
+---
+
 ## Session 25 — 2026-08-20 — Sprint 23: Strategy Discovery
 
 **What was built**

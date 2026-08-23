@@ -1020,6 +1020,22 @@ def _cmd_rl_dashboard(args: argparse.Namespace) -> int:
     for key in ("survival", "reward_wins", "peak_pop"):
         print(f"  {key}: {mono[key]}  values={mono[key + '_values']}")
 
+    # Sprint 24: reward-hacking telemetry per generation.
+    telemetry = {
+        gen: res.get("hacking_telemetry", {})
+        for gen, res in report["per_generation_results"].items()
+    }
+    if any(telemetry.values()):
+        print("\nReward-hacking telemetry (policy runs vs baseline):")
+        for gen, t in telemetry.items():
+            print(
+                f"  {gen:<8} flagged ticks: "
+                f"{t.get('flagged_ticks', 0):>4} | quarantined runs: "
+                f"{t.get('quarantined_runs', 0)}"
+            )
+    else:
+        print("\nNo reward-hacking flags raised in any generation.")
+
     regressions = report["regressions"]
     if regressions:
         print(f"\nREGRESSIONS detected ({len(regressions)} seeds where "

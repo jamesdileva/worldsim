@@ -98,6 +98,19 @@ def quick_eval(model_path: str | Path, ticks: int = 300, size: int = 32,
                num_settlements: int = 2, seed: int = 0) -> float:
     """Cheap cumulative-reward rollout for scoring mutants (no baseline run,
     no persistence)."""
+    score, _, _ = quick_eval_guarded(model_path, ticks=ticks, size=size,
+                                     num_settlements=num_settlements,
+                                     seed=seed)
+    return score
+
+
+def quick_eval_guarded(model_path: str | Path, ticks: int = 300,
+                       size: int = 32, num_settlements: int = 2,
+                       seed: int = 0) -> tuple[float, str | None, bool]:
+    """Score a checkpoint AND assess reward-hacking over the rollout.
+
+    Returns (cumulative_reward, dominant_hack_source_or_None, quarantined).
+    Quarantine triggers when the guard reaches level 3 during the rollout."""
     from stable_baselines3 import PPO
 
     from .env import WorldSimEnv
@@ -110,10 +123,12 @@ def quick_eval(model_path: str | Path, ticks: int = 300, size: int = 32,
     done = False
     while not done:
         action, _ = model.predict(obs, deterministic=True)
-        obs, reward, terminated, truncated, _ = env.step(int(action))
+        obs, reward, terminated, truncated, info = env.step(int(action))
         total += reward
-        done = terminated or truncated
-    return round(total, 4)
+        done = terminated or truncated or info["quarantined"]
+    dominant = env.reward_guard.dominant_source()
+    quarantined = env.reward_guard.quarantined_at_tick is not None
+    return round(total, 4), dominant, quarantined
 
 
 def strategy_shift_report(generation_paths: dict[str, str | Path],
@@ -213,12 +228,23 @@ def generation_index(generation: str) -> int:
     return int(digits) if digits else 0
 
 
-def select_champion(candidates: list[dict]) -> dict:
-    """Highest score; first-listed candidate breaks ties (deterministic)."""
+def select_champion(candidates: list[dict],
+                    quarantined_labels: set[str] | None = None) -> dict:
+    """Highest score among non-quarantined candidates; first-listed
+    candidate breaks ties (deterministic). Quarantined candidates (Sprint
+    24 reward-hacking response) are excluded from selection entirely."""
+    blocked = quarantined_labels or set()
+
     def tiebreak(c: dict):
         seed = c.get("seed")
         return (c["score"], 0 if seed is None else -seed)
-    return max(candidates, key=tiebreak)
+
+    eligible = [c for c in candidates if c["label"] not in blocked]
+    if not eligible:
+        # Never return nothing: fall back to the highest-scoring candidate,
+        # but the caller is expected to log the mass quarantine.
+        return max(candidates, key=tiebreak)
+    return max(eligible, key=tiebreak)
 
 
 def promote_champion(db_store, generation: str, champion: dict,
@@ -355,7 +381,7 @@ def evolve(
                         parent=prev_champion["label"],
                         mutation=f"gaussian:{strength:.3f}",
                     )
-                    score = quick_eval(
+                    score, hack_source, quarantined = quick_eval_guarded(
                         POLICIES_DIR / f"policy_{m_label}.zip",
                         ticks=eval_ticks, size=size,
                         num_settlements=num_settlements,
@@ -368,6 +394,8 @@ def evolve(
                         "origin": "mutant",
                         "mutation_strength": strength,
                         "parent": prev_champion["label"],
+                        "quarantined": quarantined,
+                        "hack_source": hack_source if quarantined else None,
                     })
 
             # --- Fresh random candidates ---------------------------------
@@ -401,7 +429,16 @@ def evolve(
                     ),
                 })
 
-            champion = select_champion(candidates)
+            quarantined = {
+                c["label"] for c in candidates if c.get("quarantined")
+            }
+            if quarantined:
+                print(
+                    f"[evolve] {gen}: QUARANTINED reward hackers: "
+                    f"{sorted(quarantined)}"
+                )
+            champion = select_champion(candidates,
+                                       quarantined_labels=quarantined)
             promote_champion(store, gen, {
                 "label": champion["label"],
                 "mean_return": champion["score"],

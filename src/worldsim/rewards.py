@@ -173,3 +173,69 @@ class RewardHackingDetector:
         if best[1] / grand > self.share_threshold:
             return best[0]
         return None
+
+
+# Guard escalation levels (Sprint 24 response ladder).
+GUARD_LEVEL_OK = 0
+GUARD_LEVEL_WARN = 1
+GUARD_LEVEL_PENALIZE = 2
+GUARD_LEVEL_QUARANTINE = 3
+
+PENALIZE_AFTER_FLAGGED_TICKS = 100   # WARN this long -> start penalizing
+QUARANTINE_AFTER_PENALIZED_TICKS = 200  # penalized this long -> quarantine
+REWARD_PENALTY_SCALE = 0.5           # reward multiplier while penalizing
+
+
+class RewardGuard:
+    """Escalating anti-reward-hacking response ladder (Sprint 24).
+
+    Level 0 OK -> 1 WARN (detector flagged) -> 2 PENALIZE (flagged for
+    PENALIZE_AFTER_FLAGGED_TICKS consecutive ticks; reward scaled by
+    REWARD_PENALTY_SCALE) -> 3 QUARANTINE (penalized for
+    QUARANTINE_AFTER_PENALIZED_TICKS more; candidate excluded from
+    selection). Recovery de-escalates one level per clean tick."""
+
+    def __init__(self, detector: RewardHackingDetector | None = None) -> None:
+        self.detector = detector or RewardHackingDetector()
+        self.level = GUARD_LEVEL_OK
+        self.flagged_ticks = 0
+        self.penalized_ticks = 0
+        self.quarantined_at_tick: int | None = None
+        self.last_dominant_source: str | None = None
+
+    def dominant_source(self) -> str | None:
+        """Current single-source exploit target, if any."""
+        return self.detector.dominant_source()
+
+    def record(self, tick: int, components: dict[str, float]) -> tuple[int, float]:
+        """Feed one tick's breakdown. Returns (level, reward_scale)."""
+        flagged = self.detector.record(tick, components)
+        self.last_dominant_source = self.detector.dominant_source()
+
+        if flagged:
+            self.flagged_ticks += 1
+        else:
+            # Clean tick de-escalates gradually.
+            self.flagged_ticks = max(0, self.flagged_ticks - 5)
+            self.penalized_ticks = max(0, self.penalized_ticks - 2)
+
+        if self.level == GUARD_LEVEL_QUARANTINE:
+            return self.level, REWARD_PENALTY_SCALE
+
+        if self.level >= GUARD_LEVEL_PENALIZE:
+            self.penalized_ticks += 1
+            if self.penalized_ticks >= QUARANTINE_AFTER_PENALIZED_TICKS:
+                self.level = GUARD_LEVEL_QUARANTINE
+                self.quarantined_at_tick = tick
+            return self.level, REWARD_PENALTY_SCALE
+
+        if self.flagged_ticks >= PENALIZE_AFTER_FLAGGED_TICKS:
+            self.level = GUARD_LEVEL_PENALIZE
+            self.penalized_ticks = 0
+            return self.level, REWARD_PENALTY_SCALE
+
+        if flagged:
+            self.level = max(self.level, GUARD_LEVEL_WARN)
+        elif self.level == GUARD_LEVEL_WARN and not flagged:
+            self.level = GUARD_LEVEL_OK
+        return self.level, 1.0

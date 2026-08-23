@@ -433,6 +433,8 @@ def _run_policy(model, seed: int, size: int, num_settlements: int,
     peak = env.controlled.population
     survived_ticks = 0
     reward_total = 0.0
+    hacking_ticks = 0
+    quarantined = False
     done = False
     while not done:
         action, _ = model.predict(obs, deterministic=True)
@@ -443,6 +445,10 @@ def _run_policy(model, seed: int, size: int, num_settlements: int,
             survived_ticks = env.sim.tick
             peak = max(peak, s.population)
         reward_total += reward
+        if info.get("hacking_flag"):
+            hacking_ticks += 1
+        if info.get("quarantined"):
+            quarantined = True
     counts = env.sim.buildings_of(env.controlled)
     end = {
         "territory": len(env.sim.territory_of(env.controlled)),
@@ -450,7 +456,8 @@ def _run_policy(model, seed: int, size: int, num_settlements: int,
         "routes": env.controlled.routes_established,
         "food": round(env.controlled.food_stock, 1),
     }
-    return survived_ticks, peak, end, round(reward_total, 3)
+    return (survived_ticks, peak, end, round(reward_total, 3),
+            hacking_ticks, quarantined)
 
 
 def paired_permutation_pvalue(a, b, n_perm: int = 10_000,
@@ -626,15 +633,20 @@ def evaluate_vs_baseline(
     wins = 0
     ties = 0
     reward_wins = 0
+    hacking_flagged = 0
+    hacking_quarantined = 0
     for i in range(num_worlds):
         seed = first_seed + i
         base_surv, base_peak, base_end, base_reward = _run_baseline(
             seed, size, num_settlements, ticks, disaster_mult, gather_mult
         )
-        pol_surv, pol_peak, pol_end, pol_reward = _run_policy(
+        (pol_surv, pol_peak, pol_end, pol_reward,
+         hack_ticks, quarantined) = _run_policy(
             model, seed, size, num_settlements, ticks, disaster_mult,
             gather_mult
         )
+        hacking_flagged += hack_ticks
+        hacking_quarantined += 1 if quarantined else 0
         if pol_surv > base_surv:
             wins += 1
         elif pol_surv == base_surv:
@@ -702,6 +714,10 @@ def evaluate_vs_baseline(
             round(wins / decided, 3) if decided else None
         ),
         "reward_win_fraction": round(reward_wins / num_worlds, 3),
+        "hacking_telemetry": {
+            "flagged_ticks": hacking_flagged,
+            "quarantined_runs": hacking_quarantined,
+        },
         "mean_baseline_survival": round(mean_base, 1),
         "mean_policy_survival": round(mean_pol, 1),
         "mean_baseline_peak_pop": float(np.mean(
