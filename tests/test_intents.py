@@ -122,10 +122,11 @@ def test_claim_invalid_when_fully_surrounded(sim_two_settlements):
     s = sim.settlements[0]
     idx = sim.settlements.index(s)
     size = sim.world.size
-    for x, y in sim.territory_of(s):
+    # territory_of yields (y, x) pairs.
+    for ty, tx in sim.territory_of(s):
         for dy in (-1, 0, 1):
             for dx in (-1, 0, 1):
-                nx, ny = x + dx, y + dy
+                nx, ny = tx + dx, ty + dy
                 if 0 <= nx < size and 0 <= ny < size:
                     if sim.world.ownership[ny, nx] == -1:
                         sim.world.ownership[ny, nx] = idx

@@ -97,6 +97,16 @@ class Settlement:
     routes_established: int = 0
     # Food income minus consumption for the most recent tick (set by sim).
     net_food_rate: float = 0.0
+    # Sprint 31: technology/eras. Era derives from researched technologies
+    # (tech.era_for); research_points accumulate deterministically per tick.
+    research_points: float = 0.0
+    technologies: list[str] = field(default_factory=list)
+
+    @property
+    def era(self) -> int:
+        from .tech import era_for
+
+        return era_for(self.technologies)
 
     @property
     def is_alive(self) -> bool:

@@ -479,9 +479,15 @@ class Simulation:
         y: int,
     ) -> bool:
         """Construct a building on an owned, unimproved, valid-terrain tile.
-        Returns True if construction succeeded."""
+        Returns True if construction succeeded. Era-gated buildings
+        (Sprint 31) require the settlement's era to be high enough."""
         spec = BUILDING_SPECS[building_type]
         size = self.world.size
+        from .tech import BUILDING_ERA_REQUIREMENTS
+
+        required_era = BUILDING_ERA_REQUIREMENTS.get(building_type, 1)
+        if settlement.era < required_era:
+            return False
         if not (0 <= y < size and 0 <= x < size):
             return False
         if self.world.ownership[y, x] != self.settlements.index(settlement):
@@ -763,6 +769,24 @@ class Simulation:
                 receiver.resource_inventory.get(best_resource, 0.0)
                 + TRADE_AMOUNT_PER_TICK
             )
+        # Sprint 31: Era III donors move larger shipments.
+        from .tech import ERA3_ROUTE_TRANSFER_BONUS
+
+        extra = (
+            TRADE_AMOUNT_PER_TICK * ERA3_ROUTE_TRANSFER_BONUS
+            if donor.era >= 3
+            else 0.0
+        )
+        if extra:
+            if best_resource == "food":
+                donor.food_stock -= extra
+                receiver.food_stock += extra
+            else:
+                donor.resource_inventory[best_resource] -= extra
+                receiver.resource_inventory[best_resource] = (
+                    receiver.resource_inventory.get(best_resource, 0.0)
+                    + extra
+                )
         route.transfers += 1
         self._interacted_this_tick.update((source.id, dest.id))
         self.relations.adjust(source.id, dest.id, TRADE_TRANSFER_BONUS)
@@ -1367,12 +1391,54 @@ class Simulation:
     # Tick loop
     # ------------------------------------------------------------------
 
+    def _advance_research(self, settlement: Settlement) -> None:
+        """Sprint 31: accumulate research; auto-discover in fixed order.
+        Deterministic: rate is a pure function of population + era."""
+        if not settlement.is_alive:
+            return
+        from .tech import (
+            ERA_RESEARCH_MULTIPLIER,
+            BASE_RESEARCH_RATE,
+            TECH_RESEARCH_COSTS,
+            next_technology,
+        )
+
+        rate = (
+            BASE_RESEARCH_RATE
+            * settlement.population
+            * ERA_RESEARCH_MULTIPLIER[settlement.era]
+        )
+        settlement.research_points += rate
+        nxt = next_technology(settlement.technologies)
+        if nxt is not None and settlement.research_points >= (
+                TECH_RESEARCH_COSTS[nxt]):
+            era_before = settlement.era
+            settlement.research_points -= TECH_RESEARCH_COSTS[nxt]
+            settlement.technologies.append(nxt)
+            self.log_event(
+                "technology",
+                [settlement.id],
+                f"{settlement.name} discovered {nxt}",
+            )
+            new_era = settlement.era
+            if new_era > era_before:
+                self.log_event(
+                    "era",
+                    [settlement.id],
+                    f"{settlement.name} advanced to Era {new_era}",
+                )
+
     def food_income(self, settlement: Settlement) -> float:
         """Terrain food yields + farm output (with raid debuffs) on owned
-        tiles."""
+        tiles. Era III grants +15% farm output (Sprint 31)."""
         idx = self.settlements.index(settlement)
         owned = self.world.ownership == idx
         income = float(self.world.food_yield_grid()[owned].sum())
+        from .tech import ERA3_FARM_OUTPUT_BONUS
+
+        farm_mult = 1.0 + (
+            ERA3_FARM_OUTPUT_BONUS if settlement.era >= 3 else 0.0
+        )
         farm_tiles = np.argwhere(
             np.logical_and(
                 owned, self.world.improvements == Improvement.FARM.value
@@ -1382,6 +1448,7 @@ class Simulation:
             income += (
                 BUILDING_SPECS[BuildingType.FARM].food_output
                 * self._debuff_multiplier(int(x), int(y))
+                * farm_mult
             )
         return income
 
@@ -1501,6 +1568,7 @@ class Simulation:
             # Scarcity (any negative inventory) halves construction rate.
             if not settlement.is_in_scarcity or self.tick % 2 == 0:
                 self._process_build_queue(settlement)
+            self._advance_research(settlement)
             self._produce_resources(settlement)
             income = self.food_income(settlement) * self._drought_multiplier(
                 settlement

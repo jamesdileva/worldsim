@@ -109,6 +109,12 @@ def validate_action(sim, settlement: Settlement,
     handlers enforce so an accepted intent cannot fail 'illegally'."""
     if action_id in BUILD_ACTIONS:
         building_type = BUILD_ACTIONS[action_id]
+        from .tech import BUILDING_ERA_REQUIREMENTS
+
+        required_era = BUILDING_ERA_REQUIREMENTS.get(building_type, 1)
+        if settlement.era < required_era:
+            return False, (
+                f"missing_technology_{building_type.name.lower()}")
         spec_costs = _building_cost(building_type)
         if spec_costs is None:
             return False, "unknown_building"
@@ -172,13 +178,12 @@ def _building_cost(building_type: BuildingType) -> tuple[float, float] | None:
 def _has_claimable_neighbor(sim, settlement: Settlement) -> bool:
     ownership = sim.world.ownership
     size = sim.world.size
-    for x, y in sim.territory_of(settlement):
+    # territory_of yields (y, x) pairs straight from np.argwhere.
+    for ty, tx in sim.territory_of(settlement):
         for dy in (-1, 0, 1):
             for dx in (-1, 0, 1):
-                nx, ny = x + dx, y + dy
-                if (nx, ny) == (x, y):
-                    continue
-                if 0 <= nx < size and 0 <= ny < size:
+                nx, ny = tx + dx, ty + dy
+                if (nx, ny) != (tx, ty) and 0 <= nx < size and 0 <= ny < size:
                     if ownership[ny, nx] == UNOWNED:
                         return True
     return False
@@ -191,8 +196,9 @@ def _has_road_candidate(sim, settlement: Settlement) -> bool:
     if settlement.resource_inventory.get("stone", 0) < ROAD_COST_STONE:
         return False
     improvements = sim.world.improvements
-    for x, y in sim.territory_of(settlement):
-        if improvements[y, x] == Improvement.NONE.value:
-            if TerrainType(sim.world.terrain[y, x]) != TerrainType.WATER:
+    # territory_of yields (y, x) pairs straight from np.argwhere.
+    for ty, tx in sim.territory_of(settlement):
+        if improvements[ty, tx] == Improvement.NONE.value:
+            if TerrainType(sim.world.terrain[ty, tx]) != TerrainType.WATER:
                 return True
     return False

@@ -137,7 +137,7 @@ def test_tiny_oneliner_exact_format():
     sim = _stub_with_settlements(alpha, beta, gamma)
     line = summarize_settlement(sim, alpha, tier=TIER_TINY)
     assert line == (
-        "Alpha[agricultural|farming], pop=42, food=120, net=-2.2, "
+        "Alpha[agricultural|farming|era1], pop=42, food=120, net=-2.2, "
         "happy=0.62, terr=3, bld(F/S/M/G)=2/0/1/0, "
         "allies=Beta, WAR=Gamma"
     )
@@ -162,14 +162,15 @@ def test_full_summary_sections_present_in_order():
         "  population=42 food=120.5 net_food=-2.2 /tick happiness=0.62"
     )
     assert lines[2] == "  strategy=farming reputation=-8"
-    assert lines[3] == "  resources: stone=15.0, wood=30.0"
-    assert lines[4] == "  buildings: farm=2, mine=1"
-    assert lines[5] == "  territory=3 tiles, roads=0"
-    assert lines[6] == "  build_queue: Farm"
-    assert lines[7] == (
+    assert lines[3] == "  era=1 research=0 technologies: none"
+    assert lines[4] == "  resources: stone=15.0, wood=30.0"
+    assert lines[5] == "  buildings: farm=2, mine=1"
+    assert lines[6] == "  territory=3 tiles, roads=0"
+    assert lines[7] == "  build_queue: Farm"
+    assert lines[8] == (
         "  relations: Beta(allied, +10), Gamma(AT WAR, +0)"
     )
-    assert lines[8] == "  recent events: none"
+    assert lines[9] == "  recent events: none"
 
 
 def test_recent_events_chronological_capped():
@@ -191,7 +192,7 @@ def test_recent_events_chronological_capped():
         Event(600, "raid", ["s1"], "raid D"),
     ]
     events = summarize_settlement(sim, _make_settlement(), tier=TIER_FULL,
-                                  max_events=4).splitlines()[9:]
+                                  max_events=4).splitlines()[10:]
     assert events == [
         "    [t300] trade_route: trade A",
         "    [t400] peace: peace B",
@@ -230,7 +231,7 @@ def test_empty_personality_unknown_archetype():
     sim = _stub_with_settlements()
     s = _make_settlement(personality={})
     line = summarize_settlement(sim, s, tier=TIER_TINY)
-    assert line.startswith("Alpha[unknown|farming]")
+    assert line.startswith("Alpha[unknown|farming|era1]")
 
 
 def test_none_numeric_fields_render_placeholder():

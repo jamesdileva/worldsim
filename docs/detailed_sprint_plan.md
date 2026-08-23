@@ -742,6 +742,36 @@ history. Several items extend existing systems (diplomacy, collapse).
 | 36 | Collapse/recovery depth | Extends S5 ruins/happiness with era mechanics |
 | 37 | Long-term historical simulation | Stability + performance at 100k+ ticks |
 
+### Sprint 31 — Technology & Civilization Eras (detailed)
+
+**Duration:** 1 week
+**Deliverable:** Deterministic research accumulation, four named
+technologies in fixed order, derived eras gating existing mechanics.
+
+**Tasks:**
+- `tech.py`: TECHNOLOGIES (agriculture → masonry → engineering →
+  administration) with research costs; ERA_TECH_REQUIREMENTS (Era II =
+  agriculture+masonry, Era III = engineering+administration);
+  BUILDING_ERA_REQUIREMENTS (Mine/Granary need Era II); Era III bonuses
+  (+15% farm output, +25% route transfer size)
+- Settlement fields: `research_points`, `technologies`; `era` property
+  derived from technologies (pure function — nothing extra to persist
+  beyond the two fields)
+- Simulation: `_advance_research()` per living settlement per tick
+  (rate = 0.05 × population × era multiplier); "technology" and "era"
+  events logged (event-triggered LLM advice reacts automatically)
+- Gate enforcement at BOTH legality layers: `build_at` returns False
+  below required era; `intents.validate_action` drops with
+  `missing_technology_*` reason
+- Persistence: encode/decode both new Settlement fields; summaries show
+  era + technologies (tiny tag `eraN`, full line)
+
+**Acceptance criteria:**
+- Frozen RL contract untouched (NUM_ACTIONS == 62, OBSERVATION_DIM == 60)
+- Identical seeds → identical tech timelines (byte-equal research state)
+- Era gates enforced by sim handler AND intent validator
+- Save/load round-trips research_points/technologies exactly
+
 ## Phase 7: God Mode Expansion (Sprints 38–43)
 **Status:** Core God Mode shipped in Sprint 6 (controls, disasters,
 resource manipulation, event logging). Remaining sprints are expansions:

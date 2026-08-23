@@ -5,6 +5,48 @@ Decisions worth remembering are marked **[DECISION]**.
 
 ---
 
+## Session 33 — 2026-08-23 — Sprint 31: Technology & Eras (Phase 6 begins)
+
+**What was built**
+- `tech.py`: four technologies in fixed research order (agriculture →
+  masonry → engineering → administration) with costs; era derivation
+  (Era II = agriculture+masonry, Era III = all four); Mine/Granary gated
+  behind Era II; Era III grants +15% farm output and +25% trade
+  transfer size.
+- Settlement: `research_points` + `technologies` fields; `era` is a
+  derived property — pure function of state, nothing extra persisted.
+- Simulation: `_advance_research()` each tick for living settlements
+  (rate = 0.05 × population × era multiplier); "technology"/"era"
+  events logged so event-triggered LLM advice reacts automatically.
+- Gates enforced at BOTH legality layers: build_at returns False below
+  the required era; intents.validate_action drops with
+  `missing_technology_*` telemetry reasons.
+- Persistence round-trip + summaries: tiny lines gain an `eraN` tag,
+  full summaries gain an era/research/technologies line.
+- Live smoke: both settlements on seed 42 naturally reached Era 2 by
+  tick 600 with byte-identical timelines; 4 technology + 2 era events.
+- 13 new tests. Fast suite: 401 passing.
+
+### Decisions
+
+- **[DECISION] No new actions, no observation changes**: the frozen RL
+  contract is sacred; eras gate EXISTING mechanics instead of wiring
+  reserved no-op action IDs (wiring those would change dynamics for
+  trained policies).
+- **[DECISION] Fixed research order, no choice tree**: a single global
+  tech sequence keeps determinism trivial; S32 economies may revisit.
+- **[DECISION] Era is derived, not stored**: fewer serialized fields,
+  no way to desynchronize techs vs era.
+- **Bug fixed (latent since Sprint 28)**: territory_of yields (y, x)
+  pairs straight from np.argwhere, but `_has_claimable_neighbor`/
+  `_has_road_candidate` unpacked them as (x, y) — both validators were
+  examining transposed tiles. Fixed; the fully-surrounded intent test
+  had to be rewritten with correct semantics too.
+- Test-infrastructure note: find_building_site returns (y, x); internal
+  callers use build_at(x=site[1], y=site[0]) — new tests must match.
+
+---
+
 ## Session 32 — 2026-08-23 — Sprint 30: ML-only vs ML + LLM Comparison
 
 **What was built**

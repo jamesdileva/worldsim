@@ -194,6 +194,8 @@ def _encode_settlement(s: Settlement) -> dict:
         "strategy_label": s.strategy_label,
         "raids_committed": s.raids_committed,
         "routes_established": s.routes_established,
+        "research_points": s.research_points,
+        "technologies": list(s.technologies),
     }
 
 
@@ -217,6 +219,8 @@ def _decode_settlement(obj: dict) -> Settlement:
         strategy_label=obj.get("strategy_label", "settling"),
         raids_committed=obj.get("raids_committed", 0),
         routes_established=obj.get("routes_established", 0),
+        research_points=obj.get("research_points", 0.0),
+        technologies=list(obj.get("technologies", [])),
     )
 
 

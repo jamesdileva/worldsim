@@ -177,6 +177,8 @@ def test_food_cap_enforced():
 
 def test_granary_raises_capacity():
     sim, s = make_sim(seed=42)
+    # Sprint 31: granaries are Era II — grant the required technologies.
+    s.technologies.extend(["agriculture", "masonry"])
     site = next(
         (y, x) for y, x in sim.territory_of(s)
         if sim.world.improvements[y, x] == Improvement.NONE.value
@@ -307,6 +309,8 @@ def test_releasing_territory_destroys_improvements():
 
 def test_build_queue_processes_fifo():
     sim, s = make_sim(seed=42)
+    # Sprint 31: granaries are Era II — grant the required technologies.
+    s.technologies.extend(["agriculture", "masonry"])
     give(s, wood=50, stone=50)
     sim.enqueue_build(s, BuildingType.FARM)
     sim.enqueue_build(s, BuildingType.GRANARY)

@@ -59,6 +59,12 @@ def summarize_settlement(sim, settlement, tier: str = TIER_FULL,
     )
     lines.append(f"  strategy={settlement.strategy_label} "
                  f"reputation={_num(sim.diplomacy.rep(settlement.id), '.0f')}")
+    lines.append(
+        f"  era={settlement.era} "
+        f"research={_num(settlement.research_points, '.0f')} "
+        f"technologies: "
+        f"{', '.join(settlement.technologies) or 'none'}"
+    )
 
     resources = sorted((settlement.resource_inventory or {}).items())
     res_txt = ", ".join(f"{k}={_num(v, '.1f')}" for k, v in resources)
@@ -138,7 +144,8 @@ def _one_liner(sim, settlement, archetype: str) -> str:
     bld = "/".join(str(counts.get(bt, 0)) for bt in BuildingType)
 
     parts = [
-        f"{settlement.name}[{archetype}|{settlement.strategy_label}]",
+        f"{settlement.name}[{archetype}|{settlement.strategy_label}|"
+        f"era{settlement.era}]",
         f"pop={settlement.population}",
         f"food={_num(settlement.food_stock, '.0f')}",
         f"net={_fmt_signed(settlement.net_food_rate)}",
