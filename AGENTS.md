@@ -27,9 +27,9 @@ COMPLETE (S25–30: Ollama client, summarization, strategic reasoning,
 intent→validated-action agent, scheduled background reasoning, and a LIVE
 paired comparison showing LLM advice significantly improves
 territory/buildings/reward; sprint docs expanded through Phase 10),
-**Phase 6 in progress** (S31 technology & eras done; S32 market
-economies done; S33 highways/infrastructure done; S34 treaties &
-federations done; S35 warfare done).
+**Phase 6 in progress** (S31 technology & eras, S32 market economies,
+S33 highways/infrastructure, S34 treaties & federations, S35 warfare
+done; S36 collapse/recovery depth done).
 
 **Test tiers:** `pytest` = fast suite (~250 tests, ~3–5 min);
 `pytest -m slow` = long integration runs.
@@ -78,6 +78,7 @@ federations done; S35 warfare done).
 | `c8b6586` | 33 | Large-scale infrastructure: inter-settlement highway projects, pay-as-you-go segments, +30% trade bonus |
 | `aff5026` | 34 | Advanced diplomacy: treaties with clauses, derived federations, +15% intra-federation shipments |
 | `db6372a` | 35 | Warfare: armies/forts/sieges, wired military action slots, deterministic battles, victor-imposed tribute treaties |
+| `77acc2e` | 36 | Collapse/recovery depth: enriched ruins, refugee migration, knowledge recovery on re-settlement, building decay |
 
 ---
 
@@ -529,6 +530,28 @@ Agents replace auto-rules; the frozen RL contract is born
 - **[DECISION] Sieges impose treaties, not city capture**: capitulation
   via victor-imposed tribute reuses S34 machinery and avoids ownership
   transfer this sprint.
+
+### Session 38 — Sprint 36 (this session)
+- `recovery.py`: refugee migration (≤half of final pop to allies/
+  federation members, federation first, ≤3 per recipient, "migration"
+  events); enriched ruins record era/technologies/salvage; re-settlers
+  inherit technologies + salvage ("recovery" events — civilizations
+  rebound faster than they rose); building decay rides the scarcity-
+  collapse cadence (one building stripped per collapse event).
+- RuinSite encode/decode extended backward-compatibly.
+- Live: killed an Era-2 settlement with 3 techs → ruin captured
+  everything, ally absorbed 3 refugees, reborn civilization inherited
+  all three technologies plus salvage. Fast suite: 478 passing.
+- **[DECISION] Decay rides the collapse cadence**: a separate decay
+  counter can never fire because the collapse branch resets it every 48
+  ticks; decline now hits population and infrastructure together.
+- **[DECISION] Inherit technologies, not research points**: knowledge
+  persists in ruins; unfinished research does not.
+- **[WHY] Per-recipient refugee cap (≤3)**: prevents single-ally
+  instant booms; unabsorbed refugees vanish.
+- **Test-design lesson**: production economics + market trade rescue
+  negative-stockpile scenarios within ticks — scarcity tests must drive
+  the counter directly or isolate from trade.
 
 ---
 
