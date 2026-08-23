@@ -67,9 +67,12 @@ def test_invalid_action_id_rejected():
 
 
 def test_unwired_actions_are_noops():
+    # Sprint 35 wired TRAIN_DEFENDER/TRAIN_RAIDER/FORTIFY_BORDER;
+    # DISBAND_MILITARY and the reserved slots remain validated no-ops.
     sim, (s,) = make_sim(seed=42)
     before = dict(s.resource_inventory)
-    assert not sim.execute_action(s, int(Action.TRAIN_DEFENDER))
+    assert not sim.execute_action(s, int(Action.DISBAND_MILITARY))
+    assert not sim.execute_action(s, int(Action.UPGRADE_BUILDING))
     assert s.resource_inventory == before
 
 

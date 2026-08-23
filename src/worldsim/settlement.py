@@ -101,6 +101,11 @@ class Settlement:
     # (tech.era_for); research_points accumulate deterministically per tick.
     research_points: float = 0.0
     technologies: list[str] = field(default_factory=list)
+    # Sprint 35: warfare. army is a float pool; fort_level adds battle
+    # defense; siege_progress counts consecutive attacker victories.
+    army: float = 0.0
+    fort_level: int = 0
+    siege_progress: int = 0
 
     @property
     def era(self) -> int:

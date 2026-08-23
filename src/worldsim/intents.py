@@ -29,6 +29,8 @@ from .world import UNOWNED
 PHRASE_RULES: tuple[tuple[tuple[str, ...], Action], ...] = (
     (("raid", "attack", "plunder", "war"), Action.INITIATE_RAID),
     (("peace", "truce", "ceasefire"), Action.OFFER_PEACE),
+    (("fortify", "wall", "defense", "defence"), Action.FORTIFY_BORDER),
+    (("recruit", "soldier", "troop", "train army"), Action.TRAIN_RAIDER),
     (("granary", "storage", "food cap", "food reserve"),
      Action.BUILD_GRANARY),
     (("sawmill", "lumber", "timber"), Action.BUILD_SAWMILL),
@@ -163,6 +165,24 @@ def validate_action(sim, settlement: Settlement,
                     return False, "non_aggression_treaty"
             return False, "no_raidable_targets"
         return True, ""
+
+    if action_id == Action.TRAIN_RAIDER:
+        from .warfare import can_train_raider
+
+        ok, reason = can_train_raider(settlement)
+        return ok, "" if ok else reason
+
+    if action_id == Action.TRAIN_DEFENDER:
+        from .warfare import can_train_defender
+
+        ok, reason = can_train_defender(settlement)
+        return ok, "" if ok else reason
+
+    if action_id == Action.FORTIFY_BORDER:
+        from .warfare import can_fortify
+
+        ok, reason = can_fortify(settlement)
+        return ok, "" if ok else reason
 
     if action_id == Action.OFFER_PEACE:
         if not sim.diplomacy.wars_of(settlement.id):

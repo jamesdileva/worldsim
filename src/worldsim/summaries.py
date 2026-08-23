@@ -60,6 +60,11 @@ def summarize_settlement(sim, settlement, tier: str = TIER_FULL,
     lines.append(f"  strategy={settlement.strategy_label} "
                  f"reputation={_num(sim.diplomacy.rep(settlement.id), '.0f')}")
     lines.append(
+        f"  military: army={_num(settlement.army, '.1f')} "
+        f"fort={settlement.fort_level} "
+        f"siege_progress={settlement.siege_progress}"
+    )
+    lines.append(
         f"  era={settlement.era} "
         f"research={_num(settlement.research_points, '.0f')} "
         f"technologies: "
@@ -184,6 +189,9 @@ def _one_liner(sim, settlement, archetype: str) -> str:
         f"happy={_num(settlement.happiness, '.2f')}",
         f"terr={len(sim.territory_of(settlement))}",
         f"bld(F/S/M/G)={bld}",
+        f"mil(army/fort/siege)="
+        f"{_num(settlement.army, '.0f')}/{settlement.fort_level}/"
+        f"{settlement.siege_progress}",
     ]
 
     hostile, allied, at_war = [], [], []

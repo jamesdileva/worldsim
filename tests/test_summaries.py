@@ -143,6 +143,7 @@ def test_tiny_oneliner_exact_format():
     assert line == (
         "Alpha[agricultural|farming|era1], pop=42, food=120, net=-2.2, "
         "happy=0.62, terr=3, bld(F/S/M/G)=2/0/1/0, "
+        "mil(army/fort/siege)=0/0/0, "
         "allies=Beta, WAR=Gamma"
     )
 
@@ -166,15 +167,16 @@ def test_full_summary_sections_present_in_order():
         "  population=42 food=120.5 net_food=-2.2 /tick happiness=0.62"
     )
     assert lines[2] == "  strategy=farming reputation=-8"
-    assert lines[3] == "  era=1 research=0 technologies: none"
-    assert lines[4] == "  resources: stone=15.0, wood=30.0"
-    assert lines[5] == "  buildings: farm=2, mine=1"
-    assert lines[6] == "  territory=3 tiles, roads=0"
-    assert lines[7] == "  build_queue: Farm"
-    assert lines[8] == (
+    assert lines[3] == "  military: army=0.0 fort=0 siege_progress=0"
+    assert lines[4] == "  era=1 research=0 technologies: none"
+    assert lines[5] == "  resources: stone=15.0, wood=30.0"
+    assert lines[6] == "  buildings: farm=2, mine=1"
+    assert lines[7] == "  territory=3 tiles, roads=0"
+    assert lines[8] == "  build_queue: Farm"
+    assert lines[9] == (
         "  relations: Beta(allied, +10), Gamma(AT WAR, +0)"
     )
-    assert lines[9] == "  recent events: none"
+    assert lines[10] == "  recent events: none"
 
 
 def test_recent_events_chronological_capped():
@@ -196,7 +198,7 @@ def test_recent_events_chronological_capped():
         Event(600, "raid", ["s1"], "raid D"),
     ]
     events = summarize_settlement(sim, _make_settlement(), tier=TIER_FULL,
-                                  max_events=4).splitlines()[10:]
+                                  max_events=4).splitlines()[11:]
     assert events == [
         "    [t300] trade_route: trade A",
         "    [t400] peace: peace B",

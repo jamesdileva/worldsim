@@ -196,6 +196,9 @@ def _encode_settlement(s: Settlement) -> dict:
         "routes_established": s.routes_established,
         "research_points": s.research_points,
         "technologies": list(s.technologies),
+        "army": s.army,
+        "fort_level": s.fort_level,
+        "siege_progress": s.siege_progress,
     }
 
 
@@ -221,6 +224,9 @@ def _decode_settlement(obj: dict) -> Settlement:
         routes_established=obj.get("routes_established", 0),
         research_points=obj.get("research_points", 0.0),
         technologies=list(obj.get("technologies", [])),
+        army=obj.get("army", 0.0),
+        fort_level=obj.get("fort_level", 0),
+        siege_progress=obj.get("siege_progress", 0),
     )
 
 

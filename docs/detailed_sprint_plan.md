@@ -742,6 +742,34 @@ history. Several items extend existing systems (diplomacy, collapse).
 | 36 | Collapse/recovery depth | Extends S5 ruins/happiness with era mechanics |
 | 37 | Long-term historical simulation | Stability + performance at 100k+ ticks |
 
+### Sprint 35 — Warfare Proper (detailed)
+
+**Duration:** 1 week
+**Deliverable:** Armies, deterministic field battles between warring
+pairs, sieges imposing victor terms, war exhaustion.
+
+**Tasks:**
+- `warfare.py`: Settlement gains `army` / `fort_level` /
+  `siege_progress` (persisted); army upkeep consumes food, starving
+  armies melt
+- Three reserved military action slots WIRED (frozen IDs): TRAIN_RAIDER
+  (food→army), TRAIN_DEFENDER (food+wood→army+fort), FORTIFY_BORDER
+  (stone→fort, capped 3); affordability enforced in validate_action
+- Battles every BATTLE_INTERVAL_TICKS per war: strength = army, defense
+  × home-ground × forts; seeded rng roll; winner −15% army, loser −30%;
+  attacker wins raise siege_progress, defender wins reset it
+- SIEGE at 3 attacker wins: war ends, victor IMPOSES tribute-only
+  treaty (fulfills Sprint 34's reserved clause), loser loses half its
+  remaining army; WAR_EXHAUSTION_TICKS ends stale wars with white peace
+- Summaries expose mil(army/fort/siege) tags
+
+**Acceptance criteria:**
+- Deterministic battles: same seed/tick/state → identical outcomes
+- Sieges produce victor-imposed tribute treaties ending wars
+- Wired actions validated at both layers; DISBAND_MILITARY etc. remain
+  no-ops; frozen contract untouched (62 actions / 60 dims)
+- Military fields round-trip through save/load
+
 ### Sprint 34 — Advanced Diplomacy (detailed)
 
 **Duration:** 1 week

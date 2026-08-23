@@ -5,6 +5,50 @@ Decisions worth remembering are marked **[DECISION]**.
 
 ---
 
+## Session 37 — 2026-08-23 — Sprint 35: Warfare Proper
+
+**What was built**
+- `warfare.py`:
+  - Settlement gains `army` (float pool), `fort_level` (battle
+    defense, capped 3), `siege_progress` — persisted via encode/decode
+  - Three reserved military slots WIRED with frozen IDs: TRAIN_RAIDER
+    (10 food → +2 army), TRAIN_DEFENDER (10 food + 2 wood → +1 army,
+    +1 fort), FORTIFY_BORDER (8 stone → +1 fort)
+  - Field battles every 100 ticks per war: defense × home-ground(1.25)
+    × forts(+25%/level); seeded rng roll; winner −15% army, loser −30%;
+    attacker wins raise siege_progress, defender wins reset it
+  - SIEGE at 3 attacker victories: war ends, victor imposes a
+    tribute-only treaty, loser loses half its remaining army — the
+    promised counterpart of Sprint 34's reserved clause
+  - War exhaustion: stale wars end in white peace after 1500 ticks
+  - Army upkeep eats food; starving armies melt 5%/tick
+- LLM intents gained recruit/soldier/troop→TRAIN_RAIDER and
+  fortify/wall/defense→FORTIFY_BORDER phrase rules.
+- Summaries expose mil(army/fort/siege) in both tiers.
+- Live smoke: Brazemi won a field battle vs Zenorryn; bilateral peace
+  policies then concluded the war before the siege matured — emergent
+  interplay between warfare and diplomacy. Siege path covered by
+  deterministic tests.
+- 16 new tests; test_unwired_actions_are_noops re-pinned (DISBAND_
+  MILITARY/UPGRADE_BUILDING remain no-ops). Fast suite: 466 passing.
+
+### Decisions
+
+- **[DECISION] Wiring reserved IDs is sanctioned**: agent_spec says
+  "later sprints wire real features into reserved slots but never
+  change shapes or renumber" — TRAIN_*/FORTIFY were designed for this.
+  DISBAND_MILITARY and friends stay no-ops until needed.
+- **[DECISION] One shared army pool**: raiders and defenders feed the
+  same pool; forts + home ground give defenders their edge. Splitting
+  offensive/defensive pools was rejected as bookkeeping without depth.
+- **[DECISION] Sieges impose treaties instead of capturing cities**:
+  capitulation via victor-imposed tribute reuses S34 machinery, ends
+  wars cleanly, and avoids ownership-transfer complexity this sprint.
+- **[WHY] Battles resolve only on per-war intervals**: one clash per
+  100 ticks keeps armies strategic assets rather than per-tick noise.
+
+---
+
 ## Session 36 — 2026-08-23 — Sprint 34: Advanced Diplomacy
 
 **What was built**

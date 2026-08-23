@@ -1055,6 +1055,49 @@ class Simulation:
     def _act_initiate_raid(self, s: Settlement) -> bool:
         return self.initiate_raid(s)
 
+    def _act_train_raider(self, s: Settlement) -> bool:
+        """Sprint 35: food -> army (offensive pool)."""
+        from .warfare import TRAIN_RAIDER_ARMY_GAIN, TRAIN_RAIDER_FOOD_COST, can_train_raider
+
+        ok, _reason = can_train_raider(s)
+        if not ok:
+            return False
+        s.food_stock -= TRAIN_RAIDER_FOOD_COST
+        s.army += TRAIN_RAIDER_ARMY_GAIN
+        return True
+
+    def _act_train_defender(self, s: Settlement) -> bool:
+        """Sprint 35: food+wood -> a smaller army gain and fortification."""
+        from .warfare import (
+            TRAIN_DEFENDER_ARMY_GAIN,
+            TRAIN_DEFENDER_FOOD_COST,
+            TRAIN_DEFENDER_FORT_GAIN,
+            TRAIN_DEFENDER_WOOD_COST,
+            can_train_defender,
+        )
+
+        ok, _reason = can_train_defender(s)
+        if not ok:
+            return False
+        s.food_stock -= TRAIN_DEFENDER_FOOD_COST
+        s.resource_inventory["wood"] = (
+            s.resource_inventory.get("wood", 0.0) - TRAIN_DEFENDER_WOOD_COST)
+        s.army += TRAIN_DEFENDER_ARMY_GAIN
+        s.fort_level = min(3, s.fort_level + TRAIN_DEFENDER_FORT_GAIN)
+        return True
+
+    def _act_fortify_border(self, s: Settlement) -> bool:
+        """Sprint 35: stone -> border forts (+battle defense)."""
+        from .warfare import FORTIFY_STONE_COST, can_fortify
+
+        ok, _reason = can_fortify(s)
+        if not ok:
+            return False
+        s.resource_inventory["stone"] = (
+            s.resource_inventory.get("stone", 0.0) - FORTIFY_STONE_COST)
+        s.fort_level += 1
+        return True
+
     def _act_offer_peace(self, s: Settlement) -> bool:
         """Offer peace to a war opponent. One-sided until they reciprocate."""
         wars = self.diplomacy.wars_of(s.id)
@@ -1588,6 +1631,9 @@ class Simulation:
                 from .treaties import maybe_propose_treaties
 
                 maybe_propose_treaties(self, settlement)
+            from .warfare import apply_army_upkeep
+
+            apply_army_upkeep(settlement)
             self._produce_resources(settlement)
             income = self.food_income(settlement) * self._drought_multiplier(
                 settlement
@@ -1638,6 +1684,10 @@ class Simulation:
 
         expire_treaties(self)
         apply_tribute(self)
+        # Field battles resolve between warring pairs (Sprint 35).
+        from .warfare import resolve_battles
+
+        resolve_battles(self)
         # Trade: transfer every tick (route establishment is agent-driven).
         for route in self.trade_routes:
             if route.active:
