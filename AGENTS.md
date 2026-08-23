@@ -21,10 +21,11 @@ emergent strategies — all reproducible from a single seed.
 Stable-Baselines3 (PPO) + matplotlib + psutil + scipy.
 
 **Status:** Phase 1 ✅, Phase 2 ✅, Phase 3 ✅ (Sprints 12–18 + remediation;
-learning healthy in training metrics, eval metrics saturated), **Phase 4 in
-progress** (S19 populations, S20 mutation/elitism, S21 cross-generation
-learning, S22 self-play head-to-head, S23 strategy discovery done; sprint
-docs expanded through Phase 10).
+learning healthy in training metrics, eval metrics saturated), **Phase 4 ✅
+COMPLETE** (S19 populations, S20 mutation/elitism, S21 cross-generation
+learning, S22 self-play, S23 strategy discovery — two novel road-centric
+strategies found, S24 anti-hacking defense ladder; sprint docs expanded
+through Phase 10). Next: Phase 5 (AI Reasoning) scoping.
 
 **Test tiers:** `pytest` = fast suite (~250 tests, ~3–5 min);
 `pytest -m slow` = long integration runs.
@@ -61,6 +62,7 @@ docs expanded through Phase 10).
 | `ed3b232` | 21 | Strategy-memory aggregation into population priors, failure-weighted curricula |
 | `fafb008` | 22 | Multi-controller self-play, head-to-head competition, competitive shares/metrics |
 | `bca94ed` | 23 | Behavioral signatures, k-means strategy discovery, novelty detection, discovery log with exemplars |
+| `847624a` | 24 | RewardGuard ladder (WARN/PENALIZE/QUARANTINE), selection quarantine, exploit regression suite (**Phase 4 complete**) |
 
 ---
 
@@ -254,13 +256,32 @@ Agents replace auto-rules; the frozen RL contract is born
 - Dashboard/graphics status confirmed: CLI analytics + matplotlib PNGs only;
   interactive UIs deliberately deferred to Phase 8 (Sprints 44–50).
 
+### Session 26 — Sprint 24 (this session)
+- `RewardGuard`: escalation ladder on top of Sprint 13 detection — OK →
+  WARN → PENALIZE (reward ×0.5 after 100 flagged ticks) → QUARANTINE
+  (200 more); clean ticks de-escalate gradually.
+- Env applies penalized rewards; info gains `guard_level`/`quarantined`.
+- `quick_eval_guarded()` scores candidates + assesses hacking; quarantined
+  candidates excluded from champion selection (kept for forensics);
+  fallback returns highest-scorer if ALL are quarantined.
+- Exploit regression suite (slow tier): route farming, granary spam,
+  alternator, synthetic exploiter → quarantine. Alternator test proves
+  action-shaping evasion can't hide component-share dominance.
+- **[WHY] Gradual de-escalation**: one lucky clean tick can't reset an
+  active response; genuine reform recovers.
+- **[WHY] Quarantine excludes from selection only**: registered checkpoints
+  keep forensic value; evolution limps forward if all candidates are
+  quarantined rather than crashing.
+
 ---
 
 ## Conventions
 
 ---
 
-## Conventions
+
+---
+
 
 - Every sprint: implement → verify acceptance → update `notes.md` →
   commit+push → append changelog row + session decisions here.
