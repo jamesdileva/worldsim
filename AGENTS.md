@@ -845,8 +845,14 @@ Agents replace auto-rules; the frozen RL contract is born
   error box). Exe rebuilt; smoke verified hardened JS served + full loop.
 - **[WHY] On-page errors over console**: packaged webview windows have
   no devtools in normal use - invisible logging made this undiagnosable.
-- **[NOTE] Root cause unconfirmed until retest**; any remaining failure
-  now prints its exact message on-screen.
+- **ROOT CAUSE FOUND on retest**: user error report (null innerHTML)
+  pinpointed it - v1.1 index.html dropped the settlements status panel;
+  refreshStatus crashed, aborting refreshAll before refreshGrid ->
+  canvas never painted. Panel restored + regression test pinning every
+  app.js \ against index.html. Fast suite: 663 passing.
+- **[WHY] Static id-consistency test**: no build step or type checker
+  for the vanilla-JS frontend - a cross-check test is the only guard
+  against DOM-reference drift shipping silently.
 
 ### Session 56 - Sprint 53 (this session)
 - web/ static frontend (vanilla JS + canvas, zero build
