@@ -31,7 +31,8 @@ territory/buildings/reward; sprint docs expanded through Phase 10),
 S33 highways/infrastructure, S34 treaties & federations, S35 warfare,
 S36 collapse/recovery depth, S37 long-horizon stability: 100k ticks ≈
 11 min at 151 tps with bounded memory; sprint docs expanded through
-Phase 10).
+Phase 10), **Phase 7 in progress** (S38 god controls polish done;
+Phase 7 sprint docs S38–43 expanded with full detail).
 
 **Test tiers:** `pytest` = fast suite (~250 tests, ~3–5 min);
 `pytest -m slow` = long integration runs.
@@ -82,6 +83,7 @@ Phase 10).
 | `db6372a` | 35 | Warfare: armies/forts/sieges, wired military action slots, deterministic battles, victor-imposed tribute treaties |
 | `77acc2e` | 36 | Collapse/recovery depth: enriched ruins, refugee migration, knowledge recovery on re-settlement, building decay |
 | `3a0af35` | 37 | Long-horizon stability: bounded logs, epoch history, memoized food math, soak tests (**Phase 6 complete**) |
+| `08a7a01` | 38 | God controls polish: spawn/freeze/bless_happiness, divine audit trail, --force guard (**Phase 7 begins**) |
 
 ---
 
@@ -571,6 +573,24 @@ Agents replace auto-rules; the frozen RL contract is born
   change physics.
 - **Test lesson: tracemalloc lies about speed** (~10x allocation
   slowdown) — measure time untraced, memory in a separate traced pass.
+
+### Session 40 — Sprint 38 (this session)
+- §16 surface completion: god_spawn_settlement (deterministic names,
+  agent auto-registered), god_toggle_freeze (absolute time-stop — no
+  decisions/production/growth/decay/death), god_bless_happiness.
+- Audit trail (§16.3): every intervention logs a "divine" event
+  prefixed "GOD:" including the previously-unaudited smite/bless/
+  destroy. CLI --force required for smite ≥ 25 (§16.4).
+- Persistence bug fixed: cmd_step/cmd_god silently dropped highways +
+  treaties on load-step-save since S33/S34 (`*_,` unpack); both now
+  pass them through explicitly.
+- Phase 7 plan docs expanded with full detail for Sprints 38–43.
+- Live smoke: spawn + freeze through 60 ticks + bless verified; four
+  GOD: events logged. Fast suite: 503 passing.
+- **[DECISION] Freeze is absolute**: no partial ticking; the point is
+  suspending judgment on a settlement's fate.
+- **[DECISION] Interventions audited in-world** so LLM advisors can
+  react to gods via event-triggered reasoning, not just SQLite rows.
 
 ---
 
