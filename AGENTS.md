@@ -31,8 +31,8 @@ territory/buildings/reward; sprint docs expanded through Phase 10),
 S33 highways/infrastructure, S34 treaties & federations, S35 warfare,
 S36 collapse/recovery depth, S37 long-horizon stability: 100k ticks ≈
 11 min at 151 tps with bounded memory; sprint docs expanded through
-Phase 10), **Phase 7 in progress** (S38 god controls polish done;
-Phase 7 sprint docs S38–43 expanded with full detail).
+Phase 10), **Phase 7 in progress** (S38 god controls polish done; S39 disaster
+toolkit done; Phase 7 sprint docs S38–43 expanded with full detail).
 
 **Test tiers:** `pytest` = fast suite (~250 tests, ~3–5 min);
 `pytest -m slow` = long integration runs.
@@ -84,6 +84,7 @@ Phase 7 sprint docs S38–43 expanded with full detail).
 | `77acc2e` | 36 | Collapse/recovery depth: enriched ruins, refugee migration, knowledge recovery on re-settlement, building decay |
 | `3a0af35` | 37 | Long-horizon stability: bounded logs, epoch history, memoized food math, soak tests (**Phase 6 complete**) |
 | `08a7a01` | 38 | God controls polish: spawn/freeze/bless_happiness, divine audit trail, --force guard (**Phase 7 begins**) |
+| `d15dc27` | 39 | Disaster toolkit: authored disasters via shared application path, zone preview, CLI wiring |
 
 ---
 
@@ -591,6 +592,19 @@ Agents replace auto-rules; the frozen RL contract is born
   suspending judgment on a settlement's fate.
 - **[DECISION] Interventions audited in-world** so LLM advisors can
   react to gods via event-triggered reasoning, not just SQLite rows.
+
+### Session 41 — Sprint 39 (this session)
+- `god_trigger_disaster(type, x, y, radius, duration)`: authored
+  drought/fire/plague; drought duration defaults to the standard 200;
+  zone preview (sorted affected settlements) in the before-dict; effect
+  counts (tiles burned / plague deaths) in the after-dict.
+- **Shared application path**: `_check_disasters` and god disasters
+  both route through `_apply_disaster()` — natural vs authored
+  divergence is structurally impossible.
+- CLI: `god --action trigger_disaster --disaster-type --x --y
+  [--radius] [--duration]` with validation + divine audit.
+- Live: drought on Brazemi → affected list correct, multiplier 0.5,
+  GOD: event logged. Fast suite: 512 passing.
 
 ---
 
