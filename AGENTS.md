@@ -36,8 +36,11 @@ S40 resource manipulation depth, S41 terrain manipulation, S42 nuclear
 events, S43 timeline branching/undo with byte-exact restore + branch
 timelines; sprint docs expanded through Phase 10), **Phase 8 ✅ COMPLETE** (S44 visualization, S45 civilization histories,
 S46 event timeline, S47 learning dashboard, S48 replay system, S49 world
-comparison, S50 long-running autonomous world done; sprint docs expanded
-through Phase 10).
+comparison, S50 long-running autonomous world done).
+**Phase 9 PLANNED** (The World Simulator App, Sprints 51–54:
+live shell -> serve web API -> browser frontend -> pywebview +
+PyInstaller .exe; former Advanced-Intelligence phase renumbered to
+Phase 10).
 
 **Test tiers:** `pytest` = fast suite (~250 tests, ~3–5 min);
 `pytest -m slow` = long integration runs.

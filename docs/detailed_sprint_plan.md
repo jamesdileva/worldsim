@@ -1230,13 +1230,99 @@ replay system, world comparison UIs, long-running autonomous world service.
 *The Electron/React shell decision is deferred until this phase begins;
 CLI remains the primary interface until then (decided Session 12).*
 
-## Phase 9: Advanced Intelligence (Sprints 51–56)
+## Phase 8: Living World (Sprints 44–50) — ✅ COMPLETE
+Visualization and observability delivered CLI-first: ASCII/PNG world
+maps, civilization chronicles, event timeline, learning dashboard,
+replay system, world comparison, long-running autonomous world with
+report bundles. *The GUI-shell decision was made at this phase's end
+(Session 53): pywebview + PyInstaller over a local web API.*
+
+## Phase 9: The World Simulator App (Sprints 51–54)
+One interface for everything: launch a living world, inspect it anytime,
+play god, revert — then package it as a Windows .exe. Desktop layer
+decision (Session 53): **pywebview + PyInstaller** (OS-native webview
+over a local web backend; Python-only stack, ~20 MB exe).
+
+### Sprint 51 — Interactive Shell (`worldsim live`)
+**Duration:** 1 week
+**Deliverable:** A single session that owns one living world.
+
+**Tasks:**
+- stdlib `cmd`-based REPL holding sim + store in memory: no more
+  process-per-action or snapshot reloads between commands
+- Commands mapped 1:1 from existing CLI verbs: `step [n]`, `watch
+  [interval]` (auto-stepping until Ctrl+C), `map [crop]`, `panels`,
+  `chronicle <name>`, `timeline [filters]`, `smite/bless/nuke/
+  terraform/...` (full god surface incl. confirmation gates),
+  `undo`, `branch <name>`, `compare <other>`, `save`, `load <world>`,
+  `new --seed S`, `status`, `quit`
+- Live prompt shows world id + tick (`myworld@t5400> `); command
+  history via readline where available
+- Every mutation flows through the same code paths as the CLI (god
+  methods + undo points), so audit/undo semantics are identical
+
+**Acceptance criteria:** an entire play session (launch → watch → nuke →
+regret → undo) without leaving the shell; byte-exact undo semantics
+identical to CLI; frozen contract untouched.
+
+### Sprint 52 — Local Web API (`worldsim serve`)
+**Duration:** 1–2 weeks
+**Deliverable:** REST + WebSocket server over a live simulation — the
+backbone any frontend mounts on.
+
+**Tasks:**
+- FastAPI app wrapping a live Simulation in-process: endpoints for
+  world state/map image/status panels, step control (pause/step/run at
+  speed), god actions (same validation + audit paths), undo/branches,
+  chronicle/timeline queries
+- WebSocket push of epoch snapshots + status lines while running
+- Same safety rails as everywhere else: catastrophic actions demand
+  explicit confirmations through the API; audit trail identical
+- Zero new heavyweight deps beyond FastAPI+uvicorn (already Python-only)
+
+**Acceptance criteria:** every CLI capability reachable over HTTP;
+determinism preserved (server holds one sim, mutations flow through the
+same handlers); audited + undoable exactly like CLI/live.
+
+### Sprint 53 — Web Frontend v1
+**Duration:** 1–2 weeks
+**Deliverable:** Browser UI served by `worldsim serve`.
+
+**Tasks:**
+- Single-page frontend (vanilla JS or lightweight lib — decided during
+  the sprint): canvas map view with overlays (settlements, roads,
+  contamination), timeline feed via WebSocket, god-action panel with
+  confirmations, undo button, population/event charts
+- Static assets shipped inside the package; browser opens automatically
+  on `serve`
+
+**Acceptance criteria:** launch → watch live → intervene → undo entirely
+in the browser; no external services; deterministic artifacts unchanged.
+
+### Sprint 54 — Desktop Packaging (.exe)
+**Duration:** 1 week
+**Deliverable:** Double-clickable Windows build.
+
+**Tasks:**
+- pywebview window pointed at the local server (spawned as a thread/
+  subprocess by the same entry point)
+- PyInstaller spec producing `dist/worldsim/win-unpacked/` (+ optional
+  onedir zip): bundles Python, FastAPI server, static frontend;
+  worlds.db + screenshots written under user-visible data dir
+- Smoke checklist scripted: create world → run → intervene → undo →
+  replay GIF from the packaged exe
+
+**Acceptance criteria:** .exe runs on a clean Windows machine without
+Python installed; all Sprint 51–53 capabilities work packaged; artifact
+size documented (~20 MB target).
+
+## Phase 10: Advanced Intelligence (Sprints 55–60) *(was Phase 9)*
 Population-based training at scale, meta-learning across worlds, strategy
 transfer between civilizations, deeper agent specialization, multi-level
 agents (civilization ↔ settlement hierarchies), self-improving strategies.
 *Depends on Phase 4's evolution infrastructure being proven.*
 
-## Phase 10: Experimental / Future (Sprint 57+)
+## Phase 11: Experimental / Future (Sprint 61+) *(was Phase 10)*
 Procedural 3D worlds, AI-generated assets, massive parallel worlds,
 distributed training, community worlds/shared experiments. Explicitly
 non-goal until everything above stabilizes.
@@ -1245,4 +1331,7 @@ non-goal until everything above stabilizes.
 
 ## Next Steps
 1. ~~Start Sprint 1~~ ✅ Phases 1–3 complete (Sprints 1–18 + remediation)
-2. Proceed sprint-by-sprint through Phase 4 starting at Sprint 19
+2. ~~Proceed sprint-by-sprint through Phase 4~~ ✅ Phases 4–8 complete
+   (Sprints 19–50)
+3. Phase 9 — The World Simulator App: Sprint 51 (`live` shell) next,
+   then serve → web UI → .exe packaging
