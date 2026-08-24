@@ -5,6 +5,44 @@ Decisions worth remembering are marked **[DECISION]**.
 
 ---
 
+## Session 45 — 2026-08-23 — Sprint 43: Timeline Branching / Undo (Phase 7 complete)
+
+**What was built**
+- `undo_points` table: every APPLIED god intervention writes a full-state
+  pre-intervention snapshot (captured before mutation via
+  `_undo_state_json`, persisted only when the action lands — failed
+  validations leave no noise).
+- CLI `worldsim undo --world-id`: reverts in place to the latest undo
+  point; `--as-world NEW` restores into a new world id so alternate
+  timelines coexist (`skip_entity_rows=True` sidesteps the globally-
+  unique settlements.id constraint — branch worlds live entirely in
+  their snapshot state_json).
+- `Simulation.from_state_json(state_json)`: rebuild a runnable sim from
+  any stored state (replay/branching primitive).
+- **Latent serialization bug fixed (since Sprint 5!)**: happiness,
+  negative_food_streak, and low_happiness_progress were NEVER
+  serialized — every save/resume silently reset settlement mood to 0.5.
+  Found by the byte-exact undo test (happiness 0.56 vs 0.50 diff);
+  encode/decode now round-trips all three.
+- Live smoke through the real CLI: generate → simulate → god smite
+  (Brazemi 12→0) → `undo` (reverted to tick 50, population 12) →
+  `undo --as-world branch-timeline` (coexisting branch created).
+- 7 new tests. Fast suite: 557 passing.
+
+### Decisions
+
+- **[DECISION] Undo points written post-application**: captured pre-
+  mutation but persisted only after the action applies — validation
+  failures leave no junk points to wade through.
+- **[DECISION] Branch worlds skip aux entity rows**: settlements.id is
+  globally unique so one civilization cannot exist under two world ids;
+  the snapshot state_json is the source of truth for loading branches.
+- **[WHY] Byte-exact restore as acceptance criterion**: "roughly the
+  same" hides serialization gaps; exact-equality summaries have now
+  caught two latent bugs (happiness reset, transposed territory checks).
+
+---
+
 ## Session 44 — 2026-08-23 — Sprint 42: Nuclear Events
 
 **What was built**

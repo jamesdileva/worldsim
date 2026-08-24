@@ -2126,6 +2126,45 @@ class Simulation:
         for res, amount in produced.items():
             inv[res] = inv.get(res, 0.0) + amount
 
+    @staticmethod
+    def from_state_json(state_json: str) -> "Simulation":
+        """Rebuild a Simulation from a serialized snapshot (Sprint 43:
+        undo / branching replays)."""
+        from .db import deserialize_world
+
+        (
+            world,
+            settlements,
+            trade_routes,
+            ruins,
+            disaster_events,
+            relations,
+            contested,
+            building_debuffs,
+            event_log,
+            diplomacy,
+            strategy_memory,
+            highway_projects,
+            treaties,
+            contamination_zones,
+        ) = deserialize_world(state_json)
+        return simulation_from_state(
+            world,
+            settlements,
+            trade_routes=trade_routes,
+            ruins=ruins,
+            disaster_events=disaster_events,
+            relations=relations,
+            contested=contested,
+            building_debuffs=building_debuffs,
+            event_log=event_log,
+            diplomacy=diplomacy,
+            strategy_memory=strategy_memory,
+            highway_projects=highway_projects,
+            treaties=treaties,
+            contamination_zones=contamination_zones,
+        )
+
     def _record_history_epoch(self) -> None:
         """Append one compact epoch record (Sprint 37). Deterministic."""
         living = [s for s in self.settlements if s.is_alive]

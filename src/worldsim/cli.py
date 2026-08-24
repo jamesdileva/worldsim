@@ -10,7 +10,7 @@ from pathlib import Path
 
 from .actions import Action, action_category
 from .clock import describe
-from .db import DEFAULT_DB_PATH, WorldStore
+from .db import DEFAULT_DB_PATH, WorldStore, deserialize_world
 from .simulation import (
     DEFAULT_SETTLEMENT_COUNT,
     Simulation,
@@ -190,6 +190,21 @@ def build_parser() -> argparse.ArgumentParser:
     events = sub.add_parser("events", help="List God Mode events for a world")
     events.add_argument("--world-id", required=True)
     events.add_argument(
+        "--db", default=str(DEFAULT_DB_PATH), help="SQLite database path"
+    )
+
+    undo = sub.add_parser(
+        "undo",
+        help="Revert a world to its last pre-intervention snapshot "
+             "(Sprint 43)",
+    )
+    undo.add_argument("--world-id", required=True)
+    undo.add_argument(
+        "--as-world", default=None,
+        help="Restore into a NEW world id (branch) instead of in place; "
+             "both timelines then coexist",
+    )
+    undo.add_argument(
         "--db", default=str(DEFAULT_DB_PATH), help="SQLite database path"
     )
 
@@ -683,6 +698,26 @@ def cmd_step(args: argparse.Namespace) -> int:
     return 0
 
 
+def _undo_state_json(sim, serialize_fn) -> str:
+    """Full-state serialization used for undo points (§16.4)."""
+    return serialize_fn(
+        sim.world,
+        sim.settlements,
+        trade_routes=sim.trade_routes,
+        ruins=sim.ruins,
+        disaster_events=sim.disaster_events,
+        relations=sim.relations,
+        contested=sim.contested,
+        building_debuffs=sim.building_debuffs,
+        event_log=sim.event_log,
+        diplomacy=sim.diplomacy,
+        strategy_memory=sim.strategy_memory,
+        highway_projects=sim.highway_projects,
+        treaties=sim.treaties,
+        contamination_zones=sim.contamination_zones,
+    )
+
+
 def cmd_god(args: argparse.Namespace) -> int:
     store = WorldStore(args.db)
     try:
@@ -749,6 +784,10 @@ def cmd_god(args: argparse.Namespace) -> int:
                     file=sys.stderr,
                 )
                 return 2
+        # §16.4: capture the pre-intervention state BEFORE mutating.
+        from .db import serialize_world as _sw
+
+        _pre_intervention_json = _undo_state_json(sim, _sw)
         if args.action == "destroy":
             if args.x is None or args.y is None:
                 print("destroy requires --x and --y", file=sys.stderr)
@@ -893,6 +932,14 @@ def cmd_god(args: argparse.Namespace) -> int:
                 before, after = sim.god_toggle_freeze(
                     sim.settlements[args.settlement_index]
                 )
+        # §16.4: pre-intervention snapshot (captured BEFORE mutation,
+        # written now that the action actually applied).
+        store.save_undo_point(
+            args.world_id,
+            _pre_intervention_json,
+            sim.tick,
+            label=args.action,
+        )
         store.log_god_event(
             args.world_id, sim.tick, args.action, target, before, after
         )
@@ -919,6 +966,71 @@ def cmd_god(args: argparse.Namespace) -> int:
     print(f"  target: {target}")
     print(f"  before: {before}")
     print(f"  after:  {after}")
+    return 0
+
+
+def cmd_undo(args: argparse.Namespace) -> int:
+    """Sprint 43: revert to the last pre-intervention snapshot, either in
+    place or into a branch world (alternate timeline)."""
+    store = WorldStore(args.db)
+    try:
+        point = store.latest_undo_point(args.world_id)
+        if point is None:
+            print(
+                f"no undo points recorded for world {args.world_id}",
+                file=sys.stderr,
+            )
+            return 1
+        (
+            world,
+            settlements,
+            routes,
+            ruins,
+            disasters,
+            relations,
+            contested,
+            debuffs,
+            events,
+            diplomacy,
+            strategy_memory,
+            highways,
+            treaties,
+            zones,
+        ) = deserialize_world(point["state_json"])
+        target_world = args.as_world or args.world_id
+        store.save_world_with_id(
+            target_world,
+            world,
+            settlements=settlements,
+            trade_routes=routes,
+            ruins=ruins,
+            disaster_events=disasters,
+            relations=relations,
+            contested=contested,
+            building_debuffs=debuffs,
+            event_log=events,
+            diplomacy=diplomacy,
+            strategy_memory=strategy_memory,
+            highway_projects=highways,
+            treaties=treaties,
+            contamination_zones=zones,
+            # Branch timelines share settlement ids with the origin, and
+            # those ids are globally unique in the aux tables — the
+            # snapshot state_json carries everything a branch needs.
+            skip_entity_rows=args.as_world is not None,
+        )
+    finally:
+        store.close()
+    if args.as_world:
+        print(
+            f"Branched {args.world_id} @ tick {point['tick']} "
+            f"(before '{point['label']}') into new world {args.as_world}"
+        )
+    else:
+        print(
+            f"Undid '{point['label']}': world {args.world_id} reverted "
+            f"to tick {point['tick']}"
+        )
     return 0
 
 
@@ -1695,6 +1807,7 @@ def main(argv: list[str] | None = None) -> int:
         "step": cmd_step,
         "god": cmd_god,
         "events": cmd_events,
+        "undo": cmd_undo,
         "benchmark": cmd_benchmark,
         "rl": cmd_rl,
         "llm": cmd_llm,

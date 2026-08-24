@@ -83,6 +83,16 @@ CREATE TABLE IF NOT EXISTS god_events (
     after_state JSON
 );
 
+-- Pre-intervention snapshots for undo/branching (Sprint 43, §16.4).
+CREATE TABLE IF NOT EXISTS undo_points (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    world_id TEXT NOT NULL,
+    tick INTEGER NOT NULL,
+    label TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    state_json TEXT NOT NULL
+);
+
 -- Agent experience log (Sprint 7): one row per settlement per tick.
 CREATE TABLE IF NOT EXISTS agent_history (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -200,6 +210,11 @@ def _encode_settlement(s: Settlement) -> dict:
         "fort_level": s.fort_level,
         "siege_progress": s.siege_progress,
         "frozen": s.frozen,
+        # Latent gap fixed in Sprint 43: these were never serialized
+        # before, so resumed worlds silently reset their mood.
+        "happiness": s.happiness,
+        "negative_food_streak": s.negative_food_streak,
+        "low_happiness_progress": s.low_happiness_progress,
     }
 
 
@@ -229,6 +244,9 @@ def _decode_settlement(obj: dict) -> Settlement:
         fort_level=obj.get("fort_level", 0),
         siege_progress=obj.get("siege_progress", 0),
         frozen=bool(obj.get("frozen", False)),
+        happiness=obj.get("happiness", 0.5),
+        negative_food_streak=obj.get("negative_food_streak", 0),
+        low_happiness_progress=obj.get("low_happiness_progress", 0),
     )
 
 
@@ -588,6 +606,7 @@ class WorldStore:
         highway_projects: list | None = None,
         treaties: list | None = None,
         contamination_zones: list | None = None,
+        skip_entity_rows: bool = False,
     ) -> str:
         """Insert a world row, write a snapshot, and upsert settlement,
         resource, and trade-route rows."""
@@ -622,7 +641,7 @@ class WorldStore:
                     ),
                 ),
             )
-            for s in settlements or []:
+            for s in [] if skip_entity_rows else (settlements or []):
                 self._conn.execute(
                     "INSERT INTO settlements "
                     "(id, name, world_id, spawn_x, spawn_y, created_at_tick, destroyed_at_tick) "
@@ -727,8 +746,15 @@ class WorldStore:
         highway_projects: list | None = None,
         treaties: list | None = None,
         contamination_zones: list | None = None,
+        skip_entity_rows: bool = False,
     ) -> str:
-        """Save under a caller-chosen id (upsert)."""
+        """Save under a caller-chosen id (upsert).
+
+        skip_entity_rows: write only the world + snapshot rows. Used when
+        branching timelines — settlement ids are globally unique in the
+        settlements table, so the same civilization cannot exist under
+        two world ids. The snapshot state_json carries everything needed
+        to load a branch."""
         if self.world_exists(world_id):
             self.update_world(
                 world_id,
@@ -777,7 +803,7 @@ class WorldStore:
                     ),
                 ),
             )
-            for s in settlements or []:
+            for s in [] if skip_entity_rows else (settlements or []):
                 self._conn.execute(
                     "INSERT INTO settlements "
                     "(id, name, world_id, spawn_x, spawn_y, created_at_tick, destroyed_at_tick) "
@@ -832,6 +858,7 @@ class WorldStore:
         highway_projects: list | None = None,
         treaties: list | None = None,
         contamination_zones: list | None = None,
+        skip_entity_rows: bool = False,
     ) -> None:
         """Write a new snapshot for an existing world and bump last_tick."""
         if not self.world_exists(world_id):
@@ -985,6 +1012,46 @@ class WorldStore:
                 ),
             )
         return int(cur.lastrowid)
+
+    # -- Undo points (Sprint 43) ---------------------------------------
+
+    def save_undo_point(
+        self, world_id: str, state_json: str, tick: int, label: str
+    ) -> int:
+        created_at = datetime.now(timezone.utc).isoformat()
+        with self._conn:
+            cur = self._conn.execute(
+                "INSERT INTO undo_points "
+                "(world_id, tick, label, created_at, state_json) "
+                "VALUES (?, ?, ?, ?, ?)",
+                (world_id, tick, label, created_at, state_json),
+            )
+        return int(cur.lastrowid)
+
+    def latest_undo_point(self, world_id: str) -> dict | None:
+        row = self._conn.execute(
+            "SELECT id, world_id, tick, label, created_at, state_json "
+            "FROM undo_points WHERE world_id = ? "
+            "ORDER BY id DESC LIMIT 1",
+            (world_id,),
+        ).fetchone()
+        if row is None:
+            return None
+        return {
+            "id": row[0],
+            "world_id": row[1],
+            "tick": row[2],
+            "label": row[3],
+            "created_at": row[4],
+            "state_json": row[5],
+        }
+
+    def count_undo_points(self, world_id: str) -> int:
+        row = self._conn.execute(
+            "SELECT COUNT(*) FROM undo_points WHERE world_id = ?",
+            (world_id,),
+        ).fetchone()
+        return int(row[0])
 
     def log_god_event(
         self,
