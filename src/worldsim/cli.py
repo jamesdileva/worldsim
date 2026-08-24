@@ -122,8 +122,23 @@ def build_parser() -> argparse.ArgumentParser:
             "destroy",
             "spawn_settlement",
             "freeze",
+            "trigger_disaster",
         ],
         help="Intervention to apply",
+    )
+    god.add_argument(
+        "--disaster-type",
+        choices=["drought", "fire", "plague"],
+        default=None,
+        help="Disaster type for trigger_disaster",
+    )
+    god.add_argument(
+        "--radius", type=int, default=None,
+        help="Zone radius for trigger_disaster",
+    )
+    god.add_argument(
+        "--duration", type=int, default=None,
+        help="Duration in ticks for trigger_disaster",
     )
     god.add_argument(
         "--settlement-index", type=int, default=0, help="Target settlement index"
@@ -695,6 +710,29 @@ def cmd_god(args: argparse.Namespace) -> int:
             except ValueError as exc:
                 print(str(exc), file=sys.stderr)
                 return 1
+        elif args.action == "trigger_disaster":
+            if not (args.disaster_type and args.x is not None
+                    and args.y is not None):
+                print(
+                    "trigger_disaster requires --disaster-type, --x, --y",
+                    file=sys.stderr,
+                )
+                return 2
+            from .disasters import DISASTER_RADIUS
+
+            try:
+                before, after = sim.god_trigger_disaster(
+                    args.disaster_type,
+                    args.x,
+                    args.y,
+                    radius=(args.radius if args.radius is not None
+                            else DISASTER_RADIUS),
+                    duration=args.duration,
+                )
+            except ValueError as exc:
+                print(str(exc), file=sys.stderr)
+                return 1
+            target = f"{args.disaster_type}({args.x},{args.y})"
         else:
             if not (0 <= args.settlement_index < len(sim.settlements)):
                 print("invalid --settlement-index", file=sys.stderr)

@@ -5,6 +5,36 @@ Decisions worth remembering are marked **[DECISION]**.
 
 ---
 
+## Session 41 — 2026-08-23 — Sprint 39: Disaster Toolkit
+
+**What was built**
+- `god_trigger_disaster(type, x, y, radius, duration)`: authored
+  drought/fire/plague with full parameter control; drought duration
+  defaults to the standard 200 ticks, others are instant
+- **Shared application path**: random events and god disasters both go
+  through `_apply_disaster()` — identical mechanics guaranteed by
+  construction, not by copying code
+- Zone preview: before-dict lists deterministically sorted affected
+  settlement names (via the existing zone-overlap helper)
+- After-dict carries effect counts (tiles burned / plague deaths)
+- CLI: `god --action trigger_disaster --disaster-type --x --y
+  [--radius] [--duration]` wired with validation; divine event +
+  god_events row recorded
+- Live smoke: authored drought on Brazemi → affected list correct,
+  farm multiplier dropped to 0.5, GOD: event logged.
+- 9 new tests. Fast suite: 512 passing.
+
+### Decisions
+
+- **[DECISION] One application path for random + authored events**:
+  refactored `_check_disasters` to route through the same
+  `_apply_disaster` the god action uses — divergence between "natural"
+  and "authored" behavior is now structurally impossible.
+- **[DECISION] Preview in before-dict**: the god sees who is in the
+  zone BEFORE committing; deterministic ordering makes previews stable.
+
+---
+
 ## Session 40 — 2026-08-23 — Sprint 38: God Controls Polish (Phase 7 begins)
 
 **What was built**

@@ -35,6 +35,7 @@ from .disasters import (
     DisasterEvent,
     DisasterType,
     DROUGHT_FARM_MULTIPLIER,
+    DISASTER_RADIUS,
     EVENT_CHECK_INTERVAL_TICKS,
     PLAGUE_MORTALITY,
     roll_event,
@@ -1010,10 +1011,96 @@ class Simulation:
         if event is None:
             return
         self.disaster_events.append(event)
+        self._apply_disaster(event)
+
+    def _apply_disaster(self, event: DisasterEvent) -> dict:
+        """Immediate effects for one disaster (shared by random events and
+        authored god disasters — Sprint 39)."""
+        effect: dict = {}
         if event.type == DisasterType.FIRE:
-            self._apply_fire(event)
+            effect["tiles_burned"] = self._apply_fire(event)
         elif event.type == DisasterType.PLAGUE:
+            before_pops = {
+                s.id: s.population for s in self.settlements if s.is_alive
+            }
             self._apply_plague(event)
+            deaths = {
+                s.id: before_pops[s.id] - s.population
+                for s in self.settlements
+                if s.id in before_pops
+                and s.population < before_pops[s.id]
+            }
+            effect["deaths"] = sum(deaths.values())
+        return effect
+
+    def god_trigger_disaster(
+        self,
+        disaster_type: str,
+        x: int,
+        y: int,
+        radius: int = DISASTER_RADIUS,
+        duration: int | None = None,
+    ) -> tuple[dict, dict]:
+        """Author a disaster on demand (Sprint 39). Uses the exact same
+        application mechanics as random events; drought duration defaults
+        to the standard drought length."""
+        type_map = {
+            "drought": DisasterType.DROUGHT,
+            "fire": DisasterType.FIRE,
+            "plague": DisasterType.PLAGUE,
+        }
+        if disaster_type not in type_map:
+            raise ValueError(
+                f"unknown disaster type '{disaster_type}' "
+                f"(expected one of {sorted(type_map)})"
+            )
+        dtype = type_map[disaster_type]
+        if duration is None:
+            from .disasters import DROUGHT_DURATION_TICKS
+
+            duration = (
+                DROUGHT_DURATION_TICKS
+                if dtype == DisasterType.DROUGHT
+                else 1
+            )
+        affected = sorted(
+            s.name for s in self.settlements
+            if s.is_alive and self._settlement_affected(
+                s, DisasterEvent(
+                    type=dtype, center_x=x, center_y=y, radius=radius,
+                    start_tick=self.tick, duration=duration,
+                    id="preview",
+                )
+            )
+        )
+        before = {
+            "disasters": len(self.disaster_events),
+            "affected_settlements": affected,
+        }
+        event = DisasterEvent(
+            type=dtype,
+            center_x=x,
+            center_y=y,
+            radius=radius,
+            start_tick=self.tick,
+            duration=duration,
+            id=str(uuid.uuid5(
+                uuid.NAMESPACE_URL,
+                f"worldsim/god-disaster/{self.world.seed}/{self.tick}/{x}/{y}/{dtype.name}",
+            )),
+        )
+        self.disaster_events.append(event)
+        effect = self._apply_disaster(event)
+        after = {
+            "disasters": len(self.disaster_events),
+            "type": dtype.name.lower(),
+            **effect,
+        }
+        self._divine(
+            f"unleashed a {dtype.name.lower()} at ({x}, {y}) "
+            f"r={radius} for {duration} ticks"
+        )
+        return before, after
 
     def active_disasters(self) -> list[DisasterEvent]:
         return [e for e in self.disaster_events if e.is_active(self.tick)]
