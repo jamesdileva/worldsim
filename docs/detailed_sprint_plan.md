@@ -906,6 +906,28 @@ log + population curves per epoch.
 - Population curves pad mid-run births correctly; frozen contract
   untouched
 
+### Sprint 46 — Event Timeline (detailed)
+
+**Duration:** 1 week
+**Deliverable:** Whole-world chronological timeline over the persisted
+event log, with category filters and frequency histograms.
+
+**Tasks:**
+- `timeline.py`: fixed category taxonomy (warfare/diplomacy/
+  civilization/trade/divine/disasters/other); `build_timeline` with
+  AND-combined type/category/actor/since filters and oldest-first
+  limit; `render_timeline` with human date stamps;
+  `category_histogram` — zero-filled per-window counts
+- `export_event_histogram`: stacked bars per category per window,
+  fixed colors, byte-deterministic
+- CLI `worldsim timeline --world-id [--types] [--categories] [--since]
+  [--limit] [--no-dates] [--png --window]`
+
+**Acceptance criteria:**
+- Deterministic filtering/ordering/histograms across identical seeds
+- Works across save/load (event log persisted)
+- Chart exports byte-identical for identical worlds
+
 ### Sprint 37 — Long-Term Historical Simulation (detailed)
 
 **Duration:** 1 week

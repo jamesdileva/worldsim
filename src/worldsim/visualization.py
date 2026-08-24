@@ -220,3 +220,51 @@ def export_population_chart(sim, path, dpi: int = 100) -> str:
     fig.savefig(path, dpi=dpi)
     plt.close(fig)
     return str(path)
+
+
+# Fixed category colors for the event histogram (Sprint 46).
+CATEGORY_COLORS = {
+    "warfare": "#b22222",
+    "diplomacy": "#4169aa",
+    "civilization": "#228b22",
+    "trade": "#b8860b",
+    "divine": "#8a2be2",
+    "disasters": "#ff8c00",
+    "other": "#666666",
+}
+
+
+def export_event_histogram(sim, path, window: int = 500,
+                           dpi: int = 100) -> str:
+    """Stacked bars of event counts per category per time window
+    (Sprint 46). Deterministic ordering: categories sorted alphabetically."""
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    import numpy as np
+
+    from .timeline import category_histogram
+
+    windows, series = category_histogram(sim, window=window)
+    xs = np.arange(len(windows))
+    fig, ax = plt.subplots(figsize=(7.0, 3.0), dpi=dpi)
+    bottom = np.zeros(len(windows))
+    for cat in sorted(series):
+        values = np.array(series[cat], dtype=float)
+        ax.bar(xs, values, bottom=bottom, width=1.0,
+               color=CATEGORY_COLORS.get(cat, "#999999"), label=cat)
+        bottom += values
+    ax.set_xticks(xs[:: max(1, len(xs) // 10)])
+    ax.set_xticklabels(
+        [str(w) for w in windows[:: max(1, len(xs) // 10)]], fontsize=6)
+    ax.set_title(f"World events per {window}-tick window", fontsize=8)
+    ax.set_xlabel("tick", fontsize=7)
+    ax.set_ylabel("events", fontsize=7)
+    ax.tick_params(labelsize=6)
+    ax.legend(fontsize=5, ncol=4)
+    ax.grid(axis="y", alpha=0.2)
+    fig.tight_layout()
+    fig.savefig(path, dpi=dpi)
+    plt.close(fig)
+    return str(path)

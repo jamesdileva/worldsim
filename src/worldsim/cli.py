@@ -258,6 +258,44 @@ def build_parser() -> argparse.ArgumentParser:
         "--db", default=str(DEFAULT_DB_PATH), help="SQLite database path"
     )
 
+    tl = sub.add_parser(
+        "timeline",
+        help="World event timeline + frequency histogram (Sprint 46)",
+    )
+    tl.add_argument("--world-id", required=True)
+    tl.add_argument(
+        "--types", default=None,
+        help="Comma-separated event types to include (e.g. raid,battle)",
+    )
+    tl.add_argument(
+        "--categories", default=None,
+        help="Comma-separated categories: warfare,diplomacy,civilization,"
+             "trade,divine,disasters",
+    )
+    tl.add_argument(
+        "--since", type=int, default=None,
+        help="Only events at tick >= since",
+    )
+    tl.add_argument(
+        "--limit", type=int, default=200,
+        help="Maximum events to print (oldest first)",
+    )
+    tl.add_argument(
+        "--no-dates", action="store_true",
+        help="Print raw ticks without human-readable dates",
+    )
+    tl.add_argument(
+        "--png", default=None,
+        help="Optional output .png for the category histogram",
+    )
+    tl.add_argument(
+        "--window", type=int, default=500,
+        help="Histogram window size in ticks",
+    )
+    tl.add_argument(
+        "--db", default=str(DEFAULT_DB_PATH), help="SQLite database path"
+    )
+
     bench = sub.add_parser(
         "benchmark", help="Run the rule-based agent on benchmark worlds"
     )
@@ -1126,6 +1164,37 @@ def cmd_chronicle(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_timeline(args: argparse.Namespace) -> int:
+    """Sprint 46: world event timeline + histogram."""
+    from .timeline import build_timeline, render_timeline
+    from .visualization import export_event_histogram
+
+    store = WorldStore(args.db)
+    try:
+        sim = _load_sim_from_store(store, args.world_id)
+    finally:
+        store.close()
+
+    types = (
+        {t.strip() for t in args.types.split(",") if t.strip()}
+        if args.types else None
+    )
+    categories = (
+        {c.strip() for c in args.categories.split(",") if c.strip()}
+        if args.categories else None
+    )
+    events = build_timeline(
+        sim, types=types, categories=categories, since_tick=args.since,
+        limit=args.limit,
+    )
+    print(render_timeline(sim, events, date_stamps=not args.no_dates))
+    print(f"\n({len(events)} events shown)")
+    if args.png:
+        path = export_event_histogram(sim, args.png, window=args.window)
+        print(f"histogram written to {path}")
+    return 0
+
+
 def cmd_undo(args: argparse.Namespace) -> int:
     """Sprint 43: revert to the last pre-intervention snapshot, either in
     place or into a branch world (alternate timeline)."""
@@ -1967,6 +2036,7 @@ def main(argv: list[str] | None = None) -> int:
         "undo": cmd_undo,
         "map": cmd_map,
         "chronicle": cmd_chronicle,
+        "timeline": cmd_timeline,
         "benchmark": cmd_benchmark,
         "rl": cmd_rl,
         "llm": cmd_llm,
