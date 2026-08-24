@@ -928,6 +928,31 @@ event log, with category filters and frequency histograms.
 - Works across save/load (event log persisted)
 - Chart exports byte-identical for identical worlds
 
+### Sprint 47 — Learning Dashboard (detailed)
+
+**Duration:** 1 week
+**Deliverable:** Consolidated offline training-health dashboard across
+policy generations.
+
+**Tasks:**
+- `build_learning_dashboard(store, gens)`: reads ONLY stored artifacts
+  (latest checkpoint per generation + its train-time `_summary.json`) —
+  no models loaded, no rollouts; per-generation return trend vs previous,
+  entropy-collapse detection (threshold 0.1), explained-variance bands
+  (good ≥0.7 / ok ≥0.4 / poor), KL warning (>0.03)
+- Overall status aggregation: regressed > watch > healthy; missing
+  generations reported without crashing
+- `generate_health_dashboard_plot`: 2×2 panels (return, final entropy
+  with collapse line, explained variance with good line, ticks/second)
+- `render_health_dashboard_markdown` + CLI `rl health --gens --png
+  --markdown`
+
+**Acceptance criteria:**
+- Flags proven against synthetic summaries (collapse/regression/KL/EV);
+  overall status stays "regressed" even after later recovery
+- Fast: offline by construction; works for any generations present;
+  frozen contract untouched
+
 ### Sprint 37 — Long-Term Historical Simulation (detailed)
 
 **Duration:** 1 week

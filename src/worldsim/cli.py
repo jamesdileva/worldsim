@@ -404,6 +404,25 @@ def build_parser() -> argparse.ArgumentParser:
              "(Sprint 22) instead of two baseline-paired evaluations",
     )
 
+    health = rl_sub.add_parser(
+        "health",
+        help="Offline training-health dashboard across generations "
+             "(Sprint 47; reads stored summaries, no rollouts)",
+    )
+    health.add_argument("--gens", default="gen1",
+                        help="Comma-separated generation labels in order")
+    health.add_argument(
+        "--db", default=str(DEFAULT_DB_PATH), help="SQLite database path"
+    )
+    health.add_argument(
+        "--png", default=None,
+        help="Optional 2x2 health-panel .png output path",
+    )
+    health.add_argument(
+        "--markdown", default=None,
+        help="Optional markdown report output path",
+    )
+
     dash = rl_sub.add_parser(
         "dashboard",
         help="Learning-curve dashboard across policy generations (Sprint 18)",
@@ -1195,6 +1214,49 @@ def cmd_timeline(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_rl_health(args: argparse.Namespace) -> int:
+    """Sprint 47: offline learning-health dashboard."""
+    from .training import (
+        build_learning_dashboard,
+        generate_health_dashboard_plot,
+        render_health_dashboard_markdown,
+    )
+
+    store = WorldStore(args.db)
+    try:
+        generations = [
+            g.strip() for g in args.gens.split(",") if g.strip()
+        ]
+        dashboard = build_learning_dashboard(store, generations)
+    finally:
+        store.close()
+
+    print(f"Overall status: {dashboard['overall_status']}")
+    for g in dashboard["generations"]:
+        if not g.get("found"):
+            print(f"  {g['generation']}: MISSING (no checkpoint summary)")
+            continue
+        flags = ", ".join(g["flags"]) or "none"
+        print(
+            f"  {g['generation']}: return={g['mean_return']} "
+            f"({g['return_trend']}), entropy={g['final_entropy']} "
+            f"[{g['entropy_status']}], EV band={g['ev_band']}, "
+            f"KL={g['mean_approx_kl']} | flags: {flags}"
+        )
+    if args.markdown:
+        from pathlib import Path
+
+        md = Path(args.markdown)
+        md.parent.mkdir(parents=True, exist_ok=True)
+        md.write_text(render_health_dashboard_markdown(dashboard),
+                      encoding="utf-8")
+        print(f"markdown written to {md}")
+    if args.png:
+        path = generate_health_dashboard_plot(dashboard, args.png)
+        print(f"health panels written to {path}")
+    return 0
+
+
 def cmd_undo(args: argparse.Namespace) -> int:
     """Sprint 43: revert to the last pre-intervention snapshot, either in
     place or into a branch world (alternate timeline)."""
@@ -1345,7 +1407,9 @@ def cmd_benchmark(args: argparse.Namespace) -> int:
 def cmd_rl(args: argparse.Namespace) -> int:
     if args.rl_command == "train":
         return _cmd_rl_train(args)
-    if args.rl_command == "run":
+    if args.rl_command == "health":
+        return _cmd_rl_health(args)
+    if args.rl_command== "run":
         return _cmd_rl_run(args)
     if args.rl_command == "evaluate":
         return _cmd_rl_evaluate(args)

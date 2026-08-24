@@ -607,6 +607,214 @@ def generate_learning_curve_plot(curve: dict, out_png: str | Path) -> Path:
     return out
 
 
+# ----------------------------------------------------------------------
+# Learning health dashboard (Sprint 47)
+# ----------------------------------------------------------------------
+
+ENTROPY_COLLAPSE_THRESHOLD = 0.1
+EXPLAINED_VARIANCE_GOOD = 0.7
+EXPLAINED_VARIANCE_OK = 0.4
+APPROX_KL_WARN = 0.03
+
+
+def _load_summary_for_generation(store, generation: str) -> dict | None:
+    """Latest checkpoint's sibling `_summary.json` for a generation."""
+    checkpoint = store.get_latest_policy_checkpoint(generation)
+    if checkpoint is None:
+        return None
+    path = Path(checkpoint["path"])
+    summary_path = path.parent / f"{path.stem}_summary.json"
+    if not summary_path.exists():
+        return None
+    try:
+        data = json.loads(summary_path.read_text(encoding="utf-8"))
+        data["checkpoint_path"] = str(path)
+        data["total_timesteps"] = checkpoint["total_timesteps"]
+        return data
+    except (OSError, json.JSONDecodeError):
+        return None
+
+
+def _entropy_status(final_entropy) -> tuple[str, str]:
+    if final_entropy is None:
+        return "unknown", "no entropy recorded"
+    if final_entropy < ENTROPY_COLLAPSE_THRESHOLD:
+        return "collapsed", (
+            f"final entropy {final_entropy} below "
+            f"{ENTROPY_COLLAPSE_THRESHOLD}"
+        )
+    return "healthy", f"final entropy {final_entropy}"
+
+
+def _explained_variance_band(mean_ev) -> tuple[str, str]:
+    if mean_ev is None:
+        return "unknown", "no explained variance recorded"
+    if mean_ev >= EXPLAINED_VARIANCE_GOOD:
+        return "good", f"explained variance {mean_ev}"
+    if mean_ev >= EXPLAINED_VARIANCE_OK:
+        return "ok", f"explained variance {mean_ev}"
+    return "poor", f"explained variance {mean_ev}"
+
+
+def build_learning_dashboard(store, generations: list[str]) -> dict:
+    """Consolidated offline training-health view (Sprint 47).
+
+    Reads ONLY stored artifacts: the latest policy checkpoint per
+    generation plus its sibling `_summary.json` written at train time.
+    Fast — no models loaded, no rollouts.
+
+    Per generation: training-return trend vs the previous generation,
+    entropy-collapse detection, explained-variance band, KL warning.
+    Overall status is 'regressed' if any regression, else 'watch' if any
+    warning flag, else 'healthy'."""
+    gens_out = []
+    prev_return = None
+    any_regression = False
+    any_warning = False
+    for gen in generations:
+        summary = _load_summary_for_generation(store, gen)
+        entry: dict = {"generation": gen, "found": summary is not None}
+        if summary is None:
+            entry["status"] = "missing"
+            gens_out.append(entry)
+            continue
+
+        mean_return = summary.get("mean_return")
+        regression = (
+            prev_return is not None and mean_return is not None
+            and mean_return < prev_return
+        )
+        any_regression = any_regression or regression
+        entropy_status, entropy_note = _entropy_status(
+            summary.get("final_entropy"))
+        ev_band, ev_note = _explained_variance_band(
+            summary.get("mean_explained_variance"))
+        kl = summary.get("mean_approx_kl")
+        kl_warn = kl is not None and kl > APPROX_KL_WARN
+        any_warning = any_warning or entropy_status != "healthy" or (
+            ev_band in ("poor", "unknown")) or kl_warn
+
+        flags = []
+        if regression:
+            flags.append("return_regressed")
+        if entropy_status == "collapsed":
+            flags.append("entropy_collapsed")
+        if ev_band == "poor":
+            flags.append("ev_poor")
+        if kl_warn:
+            flags.append("kl_high")
+
+        entry.update({
+            "mean_return": mean_return,
+            "return_trend": (
+                "n/a" if prev_return is None
+                else ("up" if not regression else "down")
+            ),
+            "final_entropy": summary.get("final_entropy"),
+            "entropy_status": entropy_status,
+            "mean_explained_variance": summary.get(
+                "mean_explained_variance"),
+            "ev_band": ev_band,
+            "mean_approx_kl": kl,
+            "ticks_per_second": summary.get("ticks_per_second"),
+            "timesteps": summary.get("total_timesteps"),
+            "flags": flags,
+            "status": (
+                "regressed" if regression
+                else ("watch" if flags else "healthy")
+            ),
+            "_notes": [entropy_note, ev_note],
+        })
+        gens_out.append(entry)
+        if mean_return is not None:
+            prev_return = mean_return
+
+    statuses = [g.get("status") for g in gens_out]
+    overall = (
+        "regressed" if any_regression
+        else ("watch" if any_warning or "missing" in statuses
+              else "healthy")
+    )
+    return {"generations": gens_out, "overall_status": overall}
+
+
+def generate_health_dashboard_plot(dashboard: dict, out_png: str | Path,
+                                   dpi: int = 110) -> Path:
+    """2x2 training-health panels per generation (Sprint 47)."""
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    found = [
+        g for g in dashboard["generations"] if g.get("found")
+    ]
+    labels = [g["generation"] for g in found]
+    x = range(max(1, len(labels)))
+    fig, axes = plt.subplots(2, 2, figsize=(9.0, 5.5), dpi=dpi)
+
+    def _values(key):
+        return [
+            g.get(key) if g.get(key) is not None else 0.0 for g in found
+        ]
+
+    axes[0][0].plot(x, _values("mean_return"), "o-", color="tab:blue")
+    axes[0][0].set_title("training return", fontsize=8)
+    axes[0][1].plot(x, _values("final_entropy"), "o-", color="tab:purple")
+    axes[0][1].axhline(ENTROPY_COLLAPSE_THRESHOLD, color="red",
+                       linestyle="--", linewidth=0.7)
+    axes[0][1].set_title("final entropy (collapse line)", fontsize=8)
+    axes[1][0].plot(x, _values("mean_explained_variance"), "o-",
+                    color="tab:green")
+    axes[1][0].axhline(EXPLAINED_VARIANCE_GOOD, color="green",
+                       linestyle="--", linewidth=0.7)
+    axes[1][0].set_title("explained variance", fontsize=8)
+    axes[1][1].bar(x, _values("ticks_per_second"), color="tab:orange")
+    axes[1][1].set_title("ticks / second", fontsize=8)
+
+    for ax_row in axes:
+        for ax in ax_row:
+            ax.set_xticks(list(x))
+            ax.set_xticklabels(labels, fontsize=7)
+            ax.tick_params(labelsize=6)
+            ax.grid(alpha=0.2)
+    fig.suptitle(
+        f"learning health — overall: "
+        f"{dashboard['overall_status']}",
+        fontsize=9,
+    )
+    fig.tight_layout()
+    out = Path(out_png)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(out, dpi=dpi)
+    plt.close(fig)
+    return out
+
+
+def render_health_dashboard_markdown(dashboard: dict) -> str:
+    lines = [
+        "# Training Health Dashboard (Sprint 47)",
+        "",
+        f"Overall status: **{dashboard['overall_status']}**",
+        "",
+        "| Generation | Return | Trend | Entropy | EV band | KL | Flags |",
+        "|---|---|---|---|---|---|---|",
+    ]
+    for g in dashboard["generations"]:
+        if not g.get("found"):
+            lines.append(
+                f"| {g['generation']} | — | — | — | — | — | missing |"
+            )
+            continue
+        lines.append(
+            f"| {g['generation']} | {g['mean_return']} "
+            f"| {g['return_trend']} | {g['final_entropy']} "
+            f"| {g['ev_band']} | {g['mean_approx_kl']} "
+            f"| {', '.join(g['flags']) or '—'} |"
+        )
+    return "\n".join(lines)
+
+
 def evaluate_vs_baseline(
     model_path: str | Path,
     num_worlds: int = 10,
