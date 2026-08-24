@@ -32,7 +32,8 @@ S33 highways/infrastructure, S34 treaties & federations, S35 warfare,
 S36 collapse/recovery depth, S37 long-horizon stability: 100k ticks ≈
 11 min at 151 tps with bounded memory; sprint docs expanded through
 Phase 10), **Phase 7 in progress** (S38 god controls polish done; S39 disaster
-toolkit done; Phase 7 sprint docs S38–43 expanded with full detail).
+toolkit done; S40 resource manipulation depth done; Phase 7 sprint docs
+S38–43 expanded with full detail).
 
 **Test tiers:** `pytest` = fast suite (~250 tests, ~3–5 min);
 `pytest -m slow` = long integration runs.
@@ -85,6 +86,7 @@ toolkit done; Phase 7 sprint docs S38–43 expanded with full detail).
 | `3a0af35` | 37 | Long-horizon stability: bounded logs, epoch history, memoized food math, soak tests (**Phase 6 complete**) |
 | `08a7a01` | 38 | God controls polish: spawn/freeze/bless_happiness, divine audit trail, --force guard (**Phase 7 begins**) |
 | `d15dc27` | 39 | Disaster toolkit: authored disasters via shared application path, zone preview, CLI wiring |
+| `df9fcc4` | 40 | Resource manipulation depth: region targeting, mass bless/strip/smite, persistent land blessings |
 
 ---
 
@@ -605,6 +607,24 @@ Agents replace auto-rules; the frozen RL contract is born
   [--radius] [--duration]` with validation + divine audit.
 - Live: drought on Brazemi → affected list correct, multiplier 0.5,
   GOD: event logged. Fast suite: 512 passing.
+
+### Session 42 — Sprint 40 (this session)
+- `regions.py`: pure geometry — circle/rect tile selectors (sorted
+  row-major, edge-clipped) + spawn-based settlement selection.
+- New audited god ops: bless/strip/smite_region (spawn-position
+  targeting), mass_bless (archetype filter), god_bless_land (persistent
+  per-tile food yield overrides on World.tile_food_bonus, applied at
+  income-read time, serialized with world state).
+- CLI: five new god actions; smite_region always requires --force.
+- Live smoke: mass bless hit all 3, region wood +50, land blessing
+  lifted income 36→54. Fast suite: 529 passing.
+- **[DECISION] Yield bonuses at read time**: base grid stays int+cached;
+  a separate bonus dict summed into income avoids dtype churn and cache
+  invalidation traps.
+- **[DECISION] Region ops target spawn positions**: predictable "who is
+  standing in the blast zone" semantics, O(1) membership.
+- **[DECISION] smite_region needs --force always**: catastrophic by
+  class, not by sum.
 
 ---
 
