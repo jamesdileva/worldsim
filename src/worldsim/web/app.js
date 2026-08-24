@@ -18,6 +18,11 @@ const COORD_ACTIONS = new Set([
 let gridCache = null;
 let selectedName = null;
 
+window.onerror = (message) => {
+  showPageError("uncaught", message);
+  return false;
+};
+
 async function api(path, options) {
   const response = await fetch(path, options);
   if (!response.ok) {
@@ -34,43 +39,67 @@ async function refreshGrid() {
   drawMap(data);
 }
 
+function showPageError(context, error) {
+  // console is invisible inside the packaged pywebview window — put
+  // failures where the user can actually see them.
+  const message = `[${context}] ${error && error.message ? error.message : error}`;
+  $("god-result").textContent = message;
+  console.error(message);
+}
+
 function drawMap(data) {
   const canvas = $("map");
-  const cell = canvas.width / data.size;
   const ctx = canvas.getContext("2d");
-  for (let y = 0; y < data.size; y++) {
-    for (let x = 0; x < data.size; x++) {
-      ctx.fillStyle = PALETTE[data.terrain[y][x]] || "#333";
-      ctx.fillRect(x * cell, y * cell, cell + 0.5, cell + 0.5);
+  try {
+    if (!data || !Array.isArray(data.terrain) || !data.size) {
+      throw new Error("grid payload incomplete");
     }
-  }
-  ctx.fillStyle = "rgba(0,0,0,0.55)";
-  for (const [x, y] of data.roads) {
-    ctx.fillRect(x * cell - 0.5, y * cell - 0.5, cell + 1, cell + 1);
-  }
-  ctx.fillStyle = "#9aa0a6";
-  ctx.font = `${Math.max(7, cell * 2.2)}px monospace`;
-  for (const r of data.ruins) {
-    ctx.fillText("X", r.x * cell, (r.y + 0.85) * cell);
-  }
-  for (const z of data.zones) {
-    ctx.fillStyle = "rgba(255,140,0,0.25)";
-    const d = z.radius * 2 + 1;
-    ctx.fillRect((z.cx - z.radius) * cell, (z.cy - z.radius) * cell,
-                 d * cell, d * cell);
-  }
-  for (const s of data.settlements) {
-    const radius = Math.max(4, Math.min(14, s.population * 0.09));
-    ctx.beginPath();
-    ctx.arc(s.x * cell, s.y * cell, radius, 0, Math.PI * 2);
-    ctx.fillStyle = s.name === selectedName ? "gold" : "crimson";
-    ctx.fill();
-    ctx.strokeStyle = "white";
-    ctx.lineWidth = s.name === selectedName ? 1.6 : 0.8;
-    ctx.stroke();
-    ctx.fillStyle = "white";
-    ctx.textAlign = "center";
-    ctx.fillText(s.name.slice(0, 8), s.x * cell, (s.y - 1.2) * cell);
+    const cell = canvas.width / data.size;
+    if (!Number.isFinite(cell) || cell <= 0) {
+      throw new Error(`bad cell size (${cell})`);
+    }
+    // Base coat first so the canvas never sits transparent (reads as
+    // black against the dark theme).
+    ctx.fillStyle = "#10131a";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    for (let y = 0; y < data.size; y++) {
+      const row = data.terrain[y];
+      if (!Array.isArray(row)) throw new Error(`terrain row ${y} missing`);
+      for (let x = 0; x < row.length && x < data.size; x++) {
+        ctx.fillStyle = PALETTE[row[x]] || "#333";
+        ctx.fillRect(x * cell, y * cell, cell + 0.5, cell + 0.5);
+      }
+    }
+    ctx.fillStyle = "rgba(0,0,0,0.55)";
+    for (const [x, y] of data.roads || []) {
+      ctx.fillRect(x * cell - 0.5, y * cell - 0.5, cell + 1, cell + 1);
+    }
+    ctx.fillStyle = "#9aa0a6";
+    ctx.font = `${Math.max(7, cell * 2.2)}px monospace`;
+    for (const r of data.ruins || []) {
+      ctx.fillText("X", r.x * cell, (r.y + 0.85) * cell);
+    }
+    for (const z of data.zones || []) {
+      ctx.fillStyle = "rgba(255,140,0,0.25)";
+      const d = z.radius * 2 + 1;
+      ctx.fillRect((z.cx - z.radius) * cell, (z.cy - z.radius) * cell,
+                   d * cell, d * cell);
+    }
+    for (const s of data.settlements || []) {
+      const radius = Math.max(4, Math.min(14, s.population * 0.09));
+      ctx.beginPath();
+      ctx.arc(s.x * cell, s.y * cell, radius, 0, Math.PI * 2);
+      ctx.fillStyle = s.name === selectedName ? "gold" : "crimson";
+      ctx.fill();
+      ctx.strokeStyle = "white";
+      ctx.lineWidth = s.name === selectedName ? 1.6 : 0.8;
+      ctx.stroke();
+      ctx.fillStyle = "white";
+      ctx.textAlign = "center";
+      ctx.fillText(s.name.slice(0, 8), s.x * cell, (s.y - 1.2) * cell);
+    }
+  } catch (e) {
+    showPageError("map render", e);
   }
 }
 
@@ -115,7 +144,7 @@ async function refreshStatus() {
     // No world loaded (fresh desktop launch): offer creation.
     $("create-box").style.display = "block";
     $("clock").textContent = "— no world loaded";
-    return;
+    return false;
   }
   $("create-box").style.display = "none";
   $("clock").textContent =
@@ -128,6 +157,7 @@ async function refreshStatus() {
       `army ${s.army} · happy ${s.happiness}${s.frozen ? " · FROZEN" : ""}`;
     list.appendChild(li);
   }
+  return true;
 }
 
 async function refreshFeed() {
@@ -161,12 +191,16 @@ async function refreshCharts() {
 
 async function refreshAll() {
   try {
-    await refreshStatus();
-    await refreshGrid();
+    const hasWorld = await refreshStatus();
+    if (hasWorld) {
+      await refreshGrid();
+    }
     await refreshFeed();
     await refreshWhatsHappening();
     await refreshCharts();
-  } catch (e) { console.error(e); }
+  } catch (e) {
+    showPageError("refresh", e);
+  }
 }
 
 $("btn-step").onclick = () => api("/api/step", {

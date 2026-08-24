@@ -5,6 +5,37 @@ Decisions worth remembering are marked **[DECISION]**.
 
 ---
 
+## Session 58 - 2026-08-24 - Sprint 54 follow-up: black-map hardening (resumed from exported session)
+
+**User report**: after creating a world in the packaged exe, the map
+canvas stayed black/blank. Empirical probe against the running exe
+proved /api/grid returns a perfect payload (64x64, palette-valid,
+settlements present) - so data is fine and the failure was client-side
+rendering, invisible because console.error goes nowhere inside pywebview.
+
+**What changed (client-only)**
+- drawMap hardened: payload guards (terrain array, size, cell NaN),
+  immediate base coat so the canvas can never sit transparent (reads as
+  black on the dark theme), per-row validation.
+- All render/refresh failures now surface ON-PAGE via god-result div
+  (showPageError) + window.onerror trap - the webview has no console.
+- Fresh-desktop flow no longer paints a spurious error box: refreshAll
+  skips grid fetch until a world exists (refreshStatus returns bool).
+- Rebuilt exe; smoke verified served app.js contains hardening + full
+  create/grid/step/smite/undo loop. Web tests 19 passing; node --check ok.
+
+### Decisions
+
+- **[WHY] On-page error surfacing over console logging**: packaged
+  pywebview windows have no devtools in normal use - an invisible
+  console made this bug undiagnosable from user reports alone.
+- **[NOTE] Root cause not yet confirmed**: if retest still shows black,
+  the on-screen error text will now name it exactly. Data path already
+  proven good end to end.
+
+---
+
+
 ## Session 57 — 2026-08-23 — Sprint 54: Desktop Packaging (.exe) — Phase 9 complete
 
 **What was built**
