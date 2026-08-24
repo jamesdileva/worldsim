@@ -833,6 +833,21 @@ Agents replace auto-rules; the frozen RL contract is born
 - **[NOTE] Curves come from in-RAM epoch history**; reloading a saved
   world starts epochs fresh (documented S45 limitation).
 
+### Session 59 - Desktop UX round (this session)
+- User reports from packaged-exe play: terraform/spawn dead,
+  no roads/buildings visible, map frozen during run, identical
+  pops after nukes.
+- Fixes: terraform_region alias (frontend action 404d on the
+  CLI-era dispatcher); coordinate actions always take clicked-tile
+  coords (selection used to swallow the aim -> stale x/y); buildings
+  added to /api/grid ([x,y,kind], ruin markers -1 excluded); canvas
+  draws opaque road tiles + f/w/m/g building glyphs; 3s grid refresh.
+- Identical pops after nukes = food-cap convergence (S50 finding),
+  not a bug; aimed nuke verified: 28 deaths, 67 improvements gone.
+- Fast suite: 665 passing; exe rebuilt + HTTP smoke vs live exe.
+- **[GOTCHA] improvements grid uses -1 for ruins**: improvement-value
+  masks must exclude negatives or ruins render as buildings.
+
 ### Session 58 - Sprint 54 follow-up (this session)
 - Resumed from an exported session: user-reported BLACK MAP after
   world creation in the packaged exe. Probe vs the live exe proved
