@@ -32,8 +32,9 @@ S33 highways/infrastructure, S34 treaties & federations, S35 warfare,
 S36 collapse/recovery depth, S37 long-horizon stability: 100k ticks ≈
 11 min at 151 tps with bounded memory; sprint docs expanded through
 Phase 10), **Phase 7 in progress** (S38 god controls polish done; S39 disaster
-toolkit done; S40 resource manipulation depth done; Phase 7 sprint docs
-S38–43 expanded with full detail).
+toolkit done; S40 resource manipulation depth done; S41 terrain
+manipulation done; Phase 7 sprint docs S38–43 expanded with full
+detail).
 
 **Test tiers:** `pytest` = fast suite (~250 tests, ~3–5 min);
 `pytest -m slow` = long integration runs.
@@ -87,6 +88,7 @@ S38–43 expanded with full detail).
 | `08a7a01` | 38 | God controls polish: spawn/freeze/bless_happiness, divine audit trail, --force guard (**Phase 7 begins**) |
 | `d15dc27` | 39 | Disaster toolkit: authored disasters via shared application path, zone preview, CLI wiring |
 | `df9fcc4` | 40 | Resource manipulation depth: region targeting, mass bless/strip/smite, persistent land blessings |
+| `a375795` | 41 | Terrain manipulation: god_terraform single/region, cache invalidation, improvement-compatibility policy |
 
 ---
 
@@ -625,6 +627,22 @@ Agents replace auto-rules; the frozen RL contract is born
   standing in the blast zone" semantics, O(1) membership.
 - **[DECISION] smite_region needs --force always**: catastrophic by
   class, not by sum.
+
+### Session 43 — Sprint 41 (this session)
+- `god_terraform(x, y, terrain)` + `god_terraform_region`: transform
+  tiles into any of six terrains; `world._food_grid` reset + sim cache
+  invalidated so yields update within the same tick (proven by test).
+- Improvement-compatibility policy: buildings die when new terrain
+  leaves their spec.valid_terrain; roads survive everywhere except
+  water; losses counted in the after-dict.
+- movement_cost is a derived property — updates automatically.
+- CLI: terraform / terraform_region with --terrain validation.
+- Live: fertile→mountain single tile; desert region reshaped 35 tiles,
+  4 improvements lost, income dropped 44→−9. Fast suite: 539 passing.
+- **[DECISION] Incompatible buildings destroyed, not relocated**: a
+  farm on mountain rock is dead land; the audit shows the cost.
+- **[DECISION] Roads die only under water**: graded earth works on any
+  land surface.
 
 ---
 
