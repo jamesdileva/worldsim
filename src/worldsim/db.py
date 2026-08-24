@@ -577,7 +577,13 @@ class WorldStore:
     def __init__(self, db_path: str | Path = DEFAULT_DB_PATH) -> None:
         self.db_path = Path(db_path)
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
-        self._conn = sqlite3.connect(self.db_path)
+        # Sprint 52: the web server touches the store from request-handler
+        # threads; a single serialized connection with an explicit lock
+        # keeps that safe (one world, one writer at a time).
+        import threading
+
+        self._lock = threading.Lock()
+        self._conn = sqlite3.connect(self.db_path, check_same_thread=False)
         self._conn.executescript(_SCHEMA)
         for migration in _MIGRATIONS:
             try:
@@ -588,6 +594,11 @@ class WorldStore:
 
     def close(self) -> None:
         self._conn.close()
+
+    def _query(self, sql, params=()):
+        # Thread-safe read path (Sprint 52).
+        with self._lock:
+            return self._conn.execute(sql, params)
 
     def save_world(
         self,
@@ -613,7 +624,7 @@ class WorldStore:
         world_id = str(uuid.uuid4())
         created_at = datetime.now(timezone.utc).isoformat()
         tick = snapshot_tick if snapshot_tick is not None else world.tick
-        with self._conn:
+        with self._lock, self._conn:
             self._conn.execute(
                 "INSERT INTO worlds (id, seed, created_at, last_tick) VALUES (?, ?, ?, ?)",
                 (world_id, world.seed, created_at, tick),
@@ -700,7 +711,7 @@ class WorldStore:
         list[WorldEvent],
         DiplomacyState,
     ]:
-        row = self._conn.execute(
+        row = self._query(
             "SELECT state_json FROM snapshots WHERE world_id = ? "
             "ORDER BY tick DESC LIMIT 1",
             (world_id,),
@@ -712,7 +723,7 @@ class WorldStore:
     def insert_world_events(self, events: list[WorldEvent]) -> int:
         if not events:
             return 0
-        with self._conn:
+        with self._lock, self._conn:
             self._conn.executemany(
                 "INSERT INTO world_events (tick, type, actor_ids, description) "
                 "VALUES (?, ?, ?, ?)",
@@ -724,7 +735,7 @@ class WorldStore:
         return len(events)
 
     def world_exists(self, world_id: str) -> bool:
-        row = self._conn.execute(
+        row = self._query(
             "SELECT 1 FROM worlds WHERE id = ?", (world_id,)
         ).fetchone()
         return row is not None
@@ -775,7 +786,7 @@ class WorldStore:
             )
             return world_id
         created_at = datetime.now(timezone.utc).isoformat()
-        with self._conn:
+        with self._lock, self._conn:
             self._conn.execute(
                 "INSERT INTO worlds (id, seed, created_at, last_tick) VALUES (?, ?, ?, ?)",
                 (world_id, world.seed, created_at, world.tick),
@@ -863,7 +874,7 @@ class WorldStore:
         """Write a new snapshot for an existing world and bump last_tick."""
         if not self.world_exists(world_id):
             raise ValueError(f"Unknown world {world_id}")
-        with self._conn:
+        with self._lock, self._conn:
             self._conn.execute(
                 "UPDATE worlds SET last_tick = ? WHERE id = ?",
                 (world.tick, world_id),
@@ -898,7 +909,7 @@ class WorldStore:
         done) tuples. Callers buffer in RAM and flush periodically."""
         if not rows:
             return 0
-        with self._conn:
+        with self._lock, self._conn:
             self._conn.executemany(
                 "INSERT INTO agent_history "
                 "(settlement_id, tick, observation, action, reward, "
@@ -908,7 +919,7 @@ class WorldStore:
         return len(rows)
 
     def agent_history_count(self) -> int:
-        row = self._conn.execute(
+        row = self._query(
             "SELECT COUNT(*) FROM agent_history"
         ).fetchone()
         return int(row[0])
@@ -916,7 +927,7 @@ class WorldStore:
     def insert_benchmark_run(self, metrics: dict) -> int:
         """Store one benchmark world's aggregated performance metrics."""
         created_at = datetime.now(timezone.utc).isoformat()
-        with self._conn:
+        with self._lock, self._conn:
             cur = self._conn.execute(
                 "INSERT INTO benchmark_runs "
                 "(seed, agent_type, ticks_requested, settlements, survivors, "
@@ -943,7 +954,7 @@ class WorldStore:
     def insert_policy_checkpoint(self, metrics: dict) -> int:
         """Store a trained policy checkpoint record (Sprint 14/16)."""
         created_at = datetime.now(timezone.utc).isoformat()
-        with self._conn:
+        with self._lock, self._conn:
             cur = self._conn.execute(
                 "INSERT INTO policy_checkpoints "
                 "(generation, path, algorithm, total_timesteps, episodes, "
@@ -970,7 +981,7 @@ class WorldStore:
     def get_latest_policy_checkpoint(
         self, generation: str
     ) -> dict | None:
-        row = self._conn.execute(
+        row = self._query(
             "SELECT id, generation, path, algorithm, total_timesteps, "
             "episodes, mean_episode_return, wall_time_seconds, checksum, "
             "size_bytes, parent, mutation, created_at FROM policy_checkpoints "
@@ -989,7 +1000,7 @@ class WorldStore:
     def insert_training_run(self, metrics: dict) -> int:
         """Store a paired evaluation run (Sprint 16)."""
         created_at = datetime.now(timezone.utc).isoformat()
-        with self._conn:
+        with self._lock, self._conn:
             cur = self._conn.execute(
                 "INSERT INTO training_runs "
                 "(policy_generation_a, policy_generation_b, eval_seed_base, "
@@ -1019,7 +1030,7 @@ class WorldStore:
         self, world_id: str, state_json: str, tick: int, label: str
     ) -> int:
         created_at = datetime.now(timezone.utc).isoformat()
-        with self._conn:
+        with self._lock, self._conn:
             cur = self._conn.execute(
                 "INSERT INTO undo_points "
                 "(world_id, tick, label, created_at, state_json) "
@@ -1029,7 +1040,7 @@ class WorldStore:
         return int(cur.lastrowid)
 
     def latest_undo_point(self, world_id: str) -> dict | None:
-        row = self._conn.execute(
+        row = self._query(
             "SELECT id, world_id, tick, label, created_at, state_json "
             "FROM undo_points WHERE world_id = ? "
             "ORDER BY id DESC LIMIT 1",
@@ -1047,7 +1058,7 @@ class WorldStore:
         }
 
     def count_undo_points(self, world_id: str) -> int:
-        row = self._conn.execute(
+        row = self._query(
             "SELECT COUNT(*) FROM undo_points WHERE world_id = ?",
             (world_id,),
         ).fetchone()
@@ -1063,7 +1074,7 @@ class WorldStore:
         after_state: dict | None,
     ) -> str:
         event_id = str(uuid.uuid4())
-        with self._conn:
+        with self._lock, self._conn:
             self._conn.execute(
                 "INSERT INTO god_events "
                 "(id, world_id, tick, action_type, target, before_state, after_state) "
@@ -1085,7 +1096,7 @@ class WorldStore:
         return event_id
 
     def get_god_events(self, world_id: str) -> list[dict]:
-        rows = self._conn.execute(
+        rows = self._query(
             "SELECT id, tick, action_type, target, before_state, after_state "
             "FROM god_events WHERE world_id = ? ORDER BY tick",
             (world_id,),

@@ -255,6 +255,20 @@ def build_parser() -> argparse.ArgumentParser:
         "--db", default=str(DEFAULT_DB_PATH), help="SQLite database path"
     )
 
+    serve = sub.add_parser(
+        "serve",
+        help="Local web API over a live simulation (Sprint 52)",
+    )
+    serve.add_argument(
+        "--world-id", default=None,
+        help="Optional world to load at startup",
+    )
+    serve.add_argument("--host", default="127.0.0.1")
+    serve.add_argument("--port", type=int, default=8000)
+    serve.add_argument(
+        "--db", default=str(DEFAULT_DB_PATH), help="SQLite database path"
+    )
+
     chron = sub.add_parser(
         "chronicle",
         help="Per-civilization histories + population curves (Sprint 45)",
@@ -1468,6 +1482,35 @@ def cmd_live(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_serve(args: argparse.Namespace) -> int:
+    """Sprint 52: local web API over a live simulation."""
+    import uvicorn
+
+    from .webapp import WorldSession, create_app
+
+    store = WorldStore(args.db)
+    try:
+        session = WorldSession(store=store)
+        if args.world_id:
+            try:
+                session.load(args.world_id)
+            except Exception as exc:
+                print(f"could not load {args.world_id!r}: {exc}",
+                      file=sys.stderr)
+                return 1
+        app = create_app(session)
+    except Exception:
+        store.close()
+        raise
+    print(f"Serving worldsim API on http://{args.host}:{args.port} "
+          f"(docs at /docs)")
+    try:
+        uvicorn.run(app, host=args.host, port=args.port, log_level="info")
+    finally:
+        store.close()
+    return 0
+
+
 def cmd_undo(args: argparse.Namespace) -> int:
     """Sprint 43: revert to the last pre-intervention snapshot, either in
     place or into a branch world (alternate timeline)."""
@@ -2313,6 +2356,7 @@ def main(argv: list[str] | None = None) -> int:
         "chronicle": cmd_chronicle,
         "timeline": cmd_timeline,
         "live": cmd_live,
+        "serve": cmd_serve,
         "replay": cmd_replay,
         "compare": cmd_compare_worlds,
         "benchmark": cmd_benchmark,

@@ -5,6 +5,46 @@ Decisions worth remembering are marked **[DECISION]**.
 
 ---
 
+## Session 55 — 2026-08-23 — Sprint 52: Local Web API (`worldsim serve`)
+
+**What was built**
+- `webapp.py`: `WorldSession` (mirrors the live shell: sim + world_id +
+  undo capture/commit) wrapped by a FastAPI factory:
+  - GET `/api/status` `/api/state` `/api/map.png` `/api/chronicle`
+    `/api/timeline`
+  - POST `/api/step` `/api/run` `/api/pause` `/api/undo` `/api/save`
+    `/api/load` `/api/god/{action}`
+  - WebSocket `/ws/status` streaming tick/population/zones on change
+- God dispatch routes through the SAME handlers + undo-point capture as
+  CLI/live; catastrophic actions (nuke, smite_region, smite ≥25) demand
+  `"confirm": true` → HTTP 428 otherwise.
+- **Real bug found and fixed**: WorldStore used a raw sqlite3 connection,
+  which rejects cross-thread use — uvicorn runs sync handlers in a
+  threadpool, so this would have broken production, not just tests.
+  Store now connects with `check_same_thread=False`, guarded by an
+  explicit lock; read paths route through a `_query()` helper.
+- CLI entry: `worldsim serve [--world-id] [--host] [--port]`.
+- Live verification over real HTTP against the year-54 S50 world:
+  step/god/undo/timeline/map.png all exercised; confirmation gate
+  returned 428 for unconfirmed big smite; clean shutdown.
+- FastAPI+uvicorn are lazy imports — rest of project stays dependency-
+  light.
+- 10 new tests via TestClient (no network). Fast suite: 653 passing.
+
+### Decisions
+
+- **[DECISION] Single serialized SQLite connection + lock**: one world,
+  one writer; request threads share the store safely without a
+  connection pool.
+- **[DECISION] HTTP 428 for missing confirmations**: semantically
+  "precondition required" — clients can distinguish refusals from
+  errors and retry with confirm=true.
+- **[WHY] Session mirrors live.py rather than sharing code**: both are
+  thin (~60 lines) owners of sim+undo state; sharing would couple the
+  shell to web types for little gain. Semantics kept identical by test.
+
+---
+
 ## Session 54 — 2026-08-23 — Sprint 51: Interactive Shell (`worldsim live`)
 
 **What was built**
