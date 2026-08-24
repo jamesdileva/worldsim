@@ -35,8 +35,8 @@ Phase 10), **Phase 7 ✅ COMPLETE** (S38 god controls polish, S39 disaster toolk
 S40 resource manipulation depth, S41 terrain manipulation, S42 nuclear
 events, S43 timeline branching/undo with byte-exact restore + branch
 timelines; sprint docs expanded through Phase 10), **Phase 8 in
-progress** (S44 advanced visualization done; S45 civilization histories
-done).
+progress** (S44 advanced visualization done; S45 civilization
+histories done; S46 event timeline done).
 
 **Test tiers:** `pytest` = fast suite (~250 tests, ~3–5 min);
 `pytest -m slow` = long integration runs.
@@ -95,6 +95,7 @@ done).
 | `30406f3` | 43 | Timeline branching/undo: undo_points snapshots, worldsim undo + --as-world branches, byte-exact restore (**Phase 7 complete**) |
 | `a3bca56` | 44 | Advanced visualization: deterministic ASCII maps + overlays, settlement panels, byte-reproducible PNG exports (**Phase 8 begins**) |
 | `a67b88b` | 45 | Civilization histories: event-log chronicles, civilizations summary, population curves + chart export |
+| `163daef` | 46 | Event timeline: categorized chronological view, filters, stacked category histogram chart |
 
 ---
 
@@ -728,6 +729,26 @@ Agents replace auto-rules; the frozen RL contract is born
 - **[DECISION] Divine events now carry actor_ids**: god interventions
   appear in the affected settlements' chronicles — the audit trail got
   strictly better for free.
+
+### Session 48 — Sprint 46 (this session)
+- `timeline.py`: fixed category taxonomy (warfare/diplomacy/
+  civilization/trade/divine/disasters/other, unknown→other);
+  `build_timeline` with AND-combined type/category/actor/since filters,
+  oldest-first limit; `render_timeline` with human date stamps;
+  `category_histogram` — zero-filled per-window counts so series plot
+  without padding logic.
+- `export_event_histogram`: stacked bars per category per window with a
+  fixed palette — byte-deterministic for identical worlds.
+- CLI: `worldsim timeline --world-id [--types] [--categories] [--since]
+  [--limit] [--no-dates] [--png --window]`.
+- Live smoke on seed 42 @1500 ticks: warfare+diplomacy timeline showed
+  the alliance and three treaties with human dates; histogram PNG
+  written to screenshots/.
+- 15 new tests. Fast suite: 597 passing.
+- **[DECISION] Limit keeps OLDEST events first**: timelines read
+  start-to-finish; newest-events views can slice from the end.
+- **[WHY] Zero-filled windows**: every category series exists in every
+  window — charts work with no padding logic at the consumer side.
 
 ---
 
