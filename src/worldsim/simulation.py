@@ -1089,6 +1089,107 @@ class Simulation:
         return {"region": [x, y, radius]}, result
 
     # ------------------------------------------------------------------
+    # God Mode depth (Sprint 41) — terrain manipulation
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _improvement_survives_terrain(
+        improvement_value: int, terrain_type
+    ) -> bool:
+        """Policy: buildings die when the new terrain can no longer host
+        them; roads survive everywhere except water."""
+        from .buildings import BUILDING_SPECS, BuildingType, Improvement
+        from .tiles import TerrainType as TT
+
+        if improvement_value == Improvement.NONE.value:
+            return True
+        if improvement_value == Improvement.ROAD.value:
+            return terrain_type != TT.WATER
+        for btype in BuildingType:
+            if Improvement(btype.value + 1).value == improvement_value:
+                spec = BUILDING_SPECS[btype]
+                return terrain_type in spec.valid_terrain
+        return False
+
+    def _terraform_tile(self, x: int, y: int, terrain_name: str) -> dict:
+        """One tile of terraforming. Returns a change record."""
+        from .tiles import TERRAIN_PROFILES, TerrainType
+
+        target = {
+            t.name.lower(): t for t in TerrainType
+        }.get((terrain_name or "").lower())
+        if target is None:
+            valid = sorted(
+                t.name.lower() for t in TerrainType)
+            raise ValueError(
+                f"unknown terrain '{terrain_name}' (expected one of {valid})"
+            )
+        size = self.world.size
+        if not (0 <= x < size and 0 <= y < size):
+            raise ValueError(f"tile ({x}, {y}) out of bounds")
+        old = TerrainType(self.world.terrain[y, x])
+        before = {"terrain": old.name.lower()}
+        self.world.terrain[y, x] = target.value
+        # Invalidate derived terrain products.
+        self.world._food_grid = None
+        self._invalidate_cache()
+        improvement_lost = False
+        if not self._improvement_survives_terrain(
+            int(self.world.improvements[y, x]), target
+        ):
+            before["improvement"] = int(self.world.improvements[y, x])
+            self.world.improvements[y, x] = Improvement.NONE.value
+            improvement_lost = True
+        after = {
+            "terrain": target.name.lower(),
+            "movement_cost": TERRAIN_PROFILES[target].movement_cost,
+            "improvement_lost": improvement_lost,
+        }
+        return {"before": before, "after": after}
+
+    def god_terraform(self, x: int, y: int, terrain_name: str) -> tuple[
+        dict, dict
+    ]:
+        """Transform a single tile's terrain (Sprint 41)."""
+        record = self._terraform_tile(x, y, terrain_name)
+        self._divine(
+            f"turned tile ({x}, {y}) into {record['after']['terrain']}"
+            + (
+                "; an improvement was lost to the new terrain"
+                if record["after"]["improvement_lost"]
+                else ""
+            )
+        )
+        return record["before"], record["after"]
+
+    def god_terraform_region(
+        self, x: int, y: int, radius: int, terrain_name: str
+    ) -> tuple[dict, dict]:
+        """Transform every tile in the circle (Sprint 41)."""
+        from .regions import circle_tiles
+
+        tiles = circle_tiles(self.world.size, x, y, radius)
+        changed = 0
+        improvements_lost = 0
+        for ty, tx in tiles:
+            current = self.world.terrain[ty, tx]
+            record = self._terraform_tile(tx, ty, terrain_name)
+            if record["before"]["terrain"] != record["after"]["terrain"]:
+                changed += 1
+            if record["after"]["improvement_lost"]:
+                improvements_lost += 1
+        result = {
+            "terrain": terrain_name,
+            "tiles_changed": changed,
+            "improvements_lost": improvements_lost,
+        }
+        self._divine(
+            f"reshaped {changed} tiles into {terrain_name} "
+            f"({improvements_lost} improvements lost)"
+        )
+        return {"region": [x, y, radius]}, result
+
+    # ------------------------------------------------------------------
     # Disasters (Sprint 5)
     # ------------------------------------------------------------------
 

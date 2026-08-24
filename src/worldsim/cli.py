@@ -128,6 +128,8 @@ def build_parser() -> argparse.ArgumentParser:
             "smite_region",
             "mass_bless",
             "bless_land",
+            "terraform",
+            "terraform_region",
         ],
         help="Intervention to apply",
     )
@@ -158,6 +160,11 @@ def build_parser() -> argparse.ArgumentParser:
     god.add_argument(
         "--bonus", type=float, default=None,
         help="Per-tile food yield bonus for bless_land",
+    )
+    god.add_argument(
+        "--terrain", default=None,
+        help="Target terrain name for terraform (water/desert/plains/"
+             "fertile/forest/mountain)",
     )
     god.add_argument(
         "--settlement-index", type=int, default=0, help="Target settlement index"
@@ -799,6 +806,34 @@ def cmd_god(args: argparse.Namespace) -> int:
                     archetype=args.archetype,
                 )
                 target = f"all ({args.archetype or 'all'})"
+        elif args.action in ("terraform", "terraform_region"):
+            if not args.terrain:
+                print(f"{args.action} requires --terrain", file=sys.stderr)
+                return 2
+            if args.action == "terraform" and (
+                args.x is None or args.y is None
+            ):
+                print("terraform requires --x and --y", file=sys.stderr)
+                return 2
+            if args.action == "terraform_region" and not (
+                args.x is not None and args.y is not None
+                and args.radius is not None
+            ):
+                print("terraform_region requires --x --y --radius",
+                      file=sys.stderr)
+                return 2
+            try:
+                if args.action == "terraform":
+                    before, after = sim.god_terraform(
+                        args.x, args.y, args.terrain)
+                    target = f"tile({args.x},{args.y})"
+                else:
+                    before, after = sim.god_terraform_region(
+                        args.x, args.y, args.radius, args.terrain)
+                    target = f"{args.terrain} r{args.radius}"
+            except ValueError as exc:
+                print(str(exc), file=sys.stderr)
+                return 1
         else:
             if not (0 <= args.settlement_index < len(sim.settlements)):
                 print("invalid --settlement-index", file=sys.stderr)

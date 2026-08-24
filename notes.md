@@ -5,6 +5,37 @@ Decisions worth remembering are marked **[DECISION]**.
 
 ---
 
+## Session 43 — 2026-08-23 — Sprint 41: Terrain Manipulation
+
+**What was built**
+- `god_terraform(x, y, terrain)` + `god_terraform_region(x, y, radius,
+  terrain)`: transform any tile/circle into water/desert/plains/
+  fertile/forest/mountain with full validation (unknown names and
+  out-of-bounds rejected)
+- Cache invalidation proven: `world._food_grid` reset + sim cache
+  invalidated → food income reflects new terrain within the same tick
+- Improvement policy: buildings die when the new terrain can no longer
+  host them (spec.valid_terrain); roads survive everywhere except water;
+  counts reported in the after-dict
+- movement_cost derives live from terrain, so it updates automatically
+- CLI: `god --action terraform --terrain ... --x --y` and
+  `terraform_region --radius`
+- Live smoke: fertile→mountain single tile; region desert reshaped 35
+  tiles, 4 incompatible improvements lost, food income dropped 44→-9.
+- 10 new tests. Fast suite: 539 passing.
+
+### Decisions
+
+- **[DECISION] Incompatible buildings are destroyed, not relocated**: a
+  farm on mountain rock is dead land; the after-dict reports losses so
+  gods see the cost of reshaping.
+- **[DECISION] Roads die only under water**: roads are graded earth,
+  usable on any land surface.
+- **[WHY] movement_cost needs no invalidation**: it is a derived
+  property computed per access — only food_yield_grid caches terrain.
+
+---
+
 ## Session 42 — 2026-08-23 — Sprint 40: Resource Manipulation Depth
 
 **What was built**
