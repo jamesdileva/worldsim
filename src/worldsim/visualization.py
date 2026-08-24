@@ -185,3 +185,38 @@ def export_map_png(sim, path, dpi: int = 100) -> str:
     fig.savefig(path, dpi=dpi)
     plt.close(fig)
     return str(path)
+
+
+def export_population_chart(sim, path, dpi: int = 100) -> str:
+    """Per-civilization population curves from epoch history (Sprint 45)."""
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    from .histories import population_curves
+
+    ticks, curves = population_curves(sim)
+    if not ticks:
+        raise ValueError(
+            "no epoch history recorded — step the simulation first"
+        )
+    fig, ax = plt.subplots(figsize=(6.4, 3.2), dpi=dpi)
+    for name in sorted(curves):
+        samples = curves[name]
+        # Pad short curves (settlements born mid-run) to full length.
+        padded = [None] * (len(ticks) - len(samples)) + samples
+        xs = [t for t, v in zip(ticks, padded) if v is not None]
+        ys = [v for v in padded if v is not None]
+        ax.plot(xs, ys, label=name, linewidth=1.0)
+    ax.set_title("Civilization populations", fontsize=8)
+    ax.set_xlabel("tick", fontsize=7)
+    ax.set_ylabel("population", fontsize=7)
+    ax.tick_params(labelsize=6)
+    if curves:
+        ax.legend(fontsize=5)
+    ax.grid(alpha=0.2)
+    fig.tight_layout()
+    fig.savefig(path, dpi=dpi)
+    plt.close(fig)
+    return str(path)

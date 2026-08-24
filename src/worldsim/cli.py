@@ -237,6 +237,27 @@ def build_parser() -> argparse.ArgumentParser:
         "--db", default=str(DEFAULT_DB_PATH), help="SQLite database path"
     )
 
+    chron = sub.add_parser(
+        "chronicle",
+        help="Per-civilization histories + population curves (Sprint 45)",
+    )
+    chron.add_argument("--world-id", required=True)
+    chron.add_argument(
+        "--settlement-index", type=int, default=None,
+        help="Print one settlement's full saga (default: summary of all)",
+    )
+    chron.add_argument(
+        "--max-lines", type=int, default=100,
+        help="Chronicle line cap per settlement",
+    )
+    chron.add_argument(
+        "--png", default=None,
+        help="Optional output .png for population curves",
+    )
+    chron.add_argument(
+        "--db", default=str(DEFAULT_DB_PATH), help="SQLite database path"
+    )
+
     bench = sub.add_parser(
         "benchmark", help="Run the rule-based agent on benchmark worlds"
     )
@@ -1061,6 +1082,47 @@ def cmd_map(args: argparse.Namespace) -> int:
     if args.png:
         path = export_map_png(sim, args.png)
         print(f"\nPNG export written to {path}")
+    return 0
+
+
+def cmd_chronicle(args: argparse.Namespace) -> int:
+    """Sprint 45: civilization histories + population curves."""
+    from .histories import (
+        civilizations_summary,
+        population_curves,
+        render_chronicle,
+    )
+    from .visualization import export_population_chart
+
+    store = WorldStore(args.db)
+    try:
+        sim = _load_sim_from_store(store, args.world_id)
+    finally:
+        store.close()
+
+    if args.settlement_index is not None:
+        if not (0 <= args.settlement_index < len(sim.settlements)):
+            print("invalid --settlement-index", file=sys.stderr)
+            return 2
+        print(render_chronicle(
+            sim, sim.settlements[args.settlement_index],
+            max_lines=args.max_lines))
+    else:
+        for line in civilizations_summary(sim):
+            print(line)
+        ticks, curves = population_curves(sim)
+        if ticks:
+            print(
+                f"\npopulation samples: {len(ticks)} epochs "
+                f"(t{ticks[0]}..t{ticks[-1]})"
+            )
+    if args.png:
+        try:
+            path = export_population_chart(sim, args.png)
+        except ValueError as exc:
+            print(str(exc), file=sys.stderr)
+            return 1
+        print(f"population chart written to {path}")
     return 0
 
 
@@ -1904,6 +1966,7 @@ def main(argv: list[str] | None = None) -> int:
         "events": cmd_events,
         "undo": cmd_undo,
         "map": cmd_map,
+        "chronicle": cmd_chronicle,
         "benchmark": cmd_benchmark,
         "rl": cmd_rl,
         "llm": cmd_llm,

@@ -859,7 +859,7 @@ class Simulation:
         if not settlement.is_alive:
             self._kill(settlement)
         after = {"population": settlement.population}
-        self._divine(f"smote {settlement.name} ({amount} population)")
+        self._divine(f"smote {settlement.name} ({amount} population)", [settlement.id])
         return before, after
 
     def god_bless_resources(
@@ -876,7 +876,7 @@ class Simulation:
                 settlement.resource_inventory.get(resource, 0.0) + amount
             )
             after = {resource: settlement.resource_inventory[resource]}
-        self._divine(f"blessed {settlement.name} with {amount} {resource}")
+        self._divine(f"blessed {settlement.name} with {amount} {resource}", [settlement.id])
         return before, after
 
     def god_destroy_improvement(self, x: int, y: int) -> tuple[dict, dict]:
@@ -891,10 +891,10 @@ class Simulation:
     # God Mode polish (Sprint 38) â€” Â§16 surface completion + audit trail
     # ------------------------------------------------------------------
 
-    def _divine(self, description: str) -> None:
+    def _divine(self, description: str, actor_ids=None) -> None:
         """Every intervention leaves a 'divine' event for the audit trail
         (Â§16.3 event history / impact tracking)."""
-        self.log_event("divine", [], f"GOD: {description}")
+        self.log_event("divine", list(actor_ids or []), f"GOD: {description}")
 
     def god_spawn_settlement(
         self, x: int, y: int, name: str | None = None
@@ -933,7 +933,7 @@ class Simulation:
         settlement.frozen = not settlement.frozen
         after = {"frozen": settlement.frozen}
         state = "froze" if settlement.frozen else "unfroze"
-        self._divine(f"{state} settlement {settlement.name}")
+        self._divine(f"{state} settlement {settlement.name}", [settlement.id])
         return before, after
 
     def god_bless_happiness(self, settlement: Settlement) -> tuple[dict, dict]:
@@ -947,7 +947,7 @@ class Simulation:
         settlement.negative_food_streak = 0
         settlement.low_happiness_progress = 0
         after = {"happiness": 1.0, "misery_counters": 0}
-        self._divine(f"blessed {settlement.name} with contentment")
+        self._divine(f"blessed {settlement.name} with contentment", [settlement.id])
         return before, after
 
     # ------------------------------------------------------------------
@@ -2166,7 +2166,9 @@ class Simulation:
         )
 
     def _record_history_epoch(self) -> None:
-        """Append one compact epoch record (Sprint 37). Deterministic."""
+        """Append one compact epoch record (Sprint 37). Deterministic.
+        Sprint 45: adds per-settlement populations for civilization
+        history curves."""
         living = [s for s in self.settlements if s.is_alive]
         from .markets import market_prices
 
@@ -2181,6 +2183,12 @@ class Simulation:
                 if living else 0.0
             ),
             "prices": market_prices(self),
+            # Sprint 45: per-civilization population samples (sorted by
+            # name for determinism).
+            "populations": {
+                s.name: s.population for s in sorted(
+                    living, key=lambda x: x.name)
+            },
         })
 
     def _kill(self, settlement: Settlement) -> RuinSite:

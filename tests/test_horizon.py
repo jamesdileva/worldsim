@@ -67,6 +67,7 @@ def test_history_epoch_fields_are_populated():
     assert set(epoch) == {
         "tick", "settlements_alive", "total_population",
         "wars_active", "routes_active", "mean_happiness", "prices",
+        "populations",
     }
     assert epoch["settlements_alive"] >= 1
     assert epoch["total_population"] > 0

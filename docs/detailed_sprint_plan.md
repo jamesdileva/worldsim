@@ -881,6 +881,31 @@ export, settlement panels.
 - PNG round-trips byte-exact across exports of the same world
 - Crop windows clamp to the grid gracefully
 
+### Sprint 45 — Civilization Histories (detailed)
+
+**Duration:** 1 week
+**Deliverable:** Per-civilization sagas reconstructed from the event
+log + population curves per epoch.
+
+**Tasks:**
+- `histories.py`: `build_chronicle` — chronological story lines from
+  founding through every event naming the settlement (techs, eras,
+  wars, battles, treaties, disasters, divine interventions, migration,
+  recovery), with fall/rebirth cross-references; `civilizations_summary`
+  one-liners (alive/fallen, era, techs, battles); `population_curves`
+  from S37 epoch history
+- Epoch history extended with a per-settlement `populations` map
+- Divine events now carry actor_ids so god interventions appear in the
+  affected settlements' chronicles
+- CLI `worldsim chronicle --world-id [--settlement-index] [--png]`
+  (matplotlib population chart export)
+
+**Acceptance criteria:**
+- Chronicles deterministic across identical seeds; work across
+  save/load for persisted events (curves are RAM-only this sprint)
+- Population curves pad mid-run births correctly; frozen contract
+  untouched
+
 ### Sprint 37 — Long-Term Historical Simulation (detailed)
 
 **Duration:** 1 week
