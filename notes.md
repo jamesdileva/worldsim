@@ -5,6 +5,114 @@ Decisions worth remembering are marked **[DECISION]**.
 
 ---
 
+## Session 50 — 2026-08-23 — Sprint 48: Replay System
+
+**What was built**
+- `timewalk.py` (named around the existing RL `replay.py` — incident
+  below): ordered frame listing (`list_frame_ticks`), exact-tick frame
+  loading via `Simulation.from_state_json`, lazy stride iteration
+  (`iter_frames`), animated GIF export with live population stats;
+  stride + max_frames bound long runs.
+- CLI: `worldsim replay --world-id [--at tick] [--list] [--gif --fps
+  --stride]`; GIF export happens with the store open (closed-database
+  bug found live and fixed).
+- Live smoke: `--list` showed the frame range, `--at 50` printed exact
+  settlement states, GIF written.
+- **Incident: clobbered `src/worldsim/replay.py`** — it already hosted
+  the Sprint 13 RL ReplayBuffer; recovered from git and moved my module
+  to timewalk.py. Recovery hit the UTF-16 redirect trap again.
+- 7 new tests. Fast suite: 614 passing.
+
+### Decisions
+
+- **[DECISION] Frames are independent simulations**: mutating a
+  replayed world can never touch stored snapshots or other frames.
+- **[WHY] Lazy iteration**: thousands of snapshots × ~100 KB json would
+  balloon RAM if eager.
+- **Naming lesson upgraded**: name-check applies to SOURCE modules too,
+  not just tests — check `git status` before creating any new file.
+
+---
+
+## Session 49 — 2026-08-23 — Sprint 47: Learning Dashboard
+
+**What was built**
+- `build_learning_dashboard(store, gens)`: consolidated OFFLINE
+  training-health view — reads only stored artifacts (latest checkpoint
+  per generation + its train-time `_summary.json`); per-generation
+  return trend vs previous, entropy-collapse detection (threshold 0.1),
+  explained-variance bands (good ≥0.7 / ok ≥0.4 / poor), KL warning
+  (>0.03); overall status regressed > watch > healthy.
+- 2×2 health panels PNG (return / final entropy with collapse line / EV
+  with good line / ticks-per-second) + markdown table report.
+- CLI: `rl health --gens --png --markdown`.
+- Live on real gen1r→gen3r artifacts: returns 6.5→10.2→13.9 (up),
+  entropy healthy, EV ok→good, gen3r KL=0.033 flagged high — matching
+  the S20 remediation findings exactly.
+- 10 new tests. Fast suite: 607 passing.
+
+### Decisions
+
+- **[DECISION] Offline by construction**: never loads models or runs
+  rollouts — instant answers from stored artifacts; expensive evaluation
+  stays in rl dashboard/evaluate.
+
+---
+
+## Session 48 — 2026-08-23 — Sprint 46: Event Timeline
+
+**What was built**
+- `timeline.py`: fixed category taxonomy (warfare/diplomacy/
+  civilization/trade/divine/disasters/other, unknown→other);
+  `build_timeline` with AND-combined type/category/actor/since filters,
+  oldest-first limit; `render_timeline` with human date stamps;
+  `category_histogram` — zero-filled per-window counts so series plot
+  without padding logic.
+- `export_event_histogram`: stacked bars per category per window with a
+  fixed palette — byte-deterministic for identical worlds.
+- CLI: `worldsim timeline --world-id [--types] [--categories] [--since]
+  [--limit] [--no-dates] [--png --window]`.
+- Live smoke on seed 42 @1500 ticks: warfare+diplomacy filter showed
+  the alliance and three treaties with human dates; histogram written
+  to screenshots/.
+- 15 new tests. Fast suite: 597 passing.
+
+### Decisions
+
+- **[DECISION] Limit keeps OLDEST events first**: timelines read
+  start-to-finish; newest-events views can slice from the end.
+- **[WHY] Zero-filled windows**: every category series exists in every
+  window — charts work with no padding logic at the consumer side.
+
+---
+
+## Session 47 — 2026-08-23 — Sprint 45: Civilization Histories
+
+**What was built**
+- `histories.py`: `build_chronicle` — each civilization's saga
+  reconstructed deterministically from the persisted event log
+  (founding, techs, eras, wars, battles, treaties, disasters, divine
+  interventions, migration, fall/rebirth cross-references);
+  `civilizations_summary` one-liners; `population_curves` from S37
+  epoch history (extended with a per-settlement `populations` map).
+- Divine events now carry actor_ids so god interventions appear in the
+  affected settlements' chronicles.
+- CLI: `worldsim chronicle --world-id [--settlement-index] [--png]`.
+- Live smoke on seed 42 @1200 ticks: Brazemi's chronicle showed
+  founding, a divine blessing, trade routes, alliances, agriculture →
+  masonry → engineering discoveries, Era 2 advancement, treaties.
+- 13 new tests. Fast suite: 582 passing.
+
+### Decisions
+
+- **[DECISION] Chronicles derive from the event log**: zero new state;
+  text works across save/load while curves are RAM-only within a run
+  (documented limitation).
+- **[DECISION] Divine events carry actor_ids**: the audit trail got
+  strictly better for free.
+
+---
+
 ## Session 46 — 2026-08-23 — Sprint 44: Advanced Visualization (Phase 8 begins)
 
 **What was built**

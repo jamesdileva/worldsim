@@ -953,6 +953,27 @@ policy generations.
 - Fast: offline by construction; works for any generations present;
   frozen contract untouched
 
+### Sprint 48 — Replay System (detailed)
+
+**Duration:** 1 week
+**Deliverable:** Reconstruct past worlds from the persisted snapshot
+trail (§18 offline catch-up / step-by-step).
+
+**Tasks:**
+- `timewalk.py` (named around the existing RL `replay.py`): ordered
+  frame listing, exact-tick frame loading via
+  `Simulation.from_state_json`, lazy stride iteration, animated GIF
+  export through recorded history
+- CLI `worldsim replay --world-id [--at tick] [--gif --fps --stride]
+  [--list]`
+- Frames are independent simulations: mutating one never touches stored
+  state or other frames
+
+**Acceptance criteria:**
+- Loading tick T reproduces exactly the world saved at T; replayed
+  frames mutate freely without side effects; GIF exports bounded on
+  long runs (stride + max_frames); frozen contract untouched
+
 ### Sprint 37 — Long-Term Historical Simulation (detailed)
 
 **Duration:** 1 week

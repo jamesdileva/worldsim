@@ -296,6 +296,34 @@ def build_parser() -> argparse.ArgumentParser:
         "--db", default=str(DEFAULT_DB_PATH), help="SQLite database path"
     )
 
+    rep = sub.add_parser(
+        "replay",
+        help="Replay a world's recorded snapshot history (Sprint 48)",
+    )
+    rep.add_argument("--world-id", required=True)
+    rep.add_argument(
+        "--at", type=int, default=None,
+        help="Print the world exactly as it was at this tick",
+    )
+    rep.add_argument(
+        "--gif", default=None,
+        help="Optional output .gif animating through recorded history",
+    )
+    rep.add_argument(
+        "--fps", type=float, default=4.0, help="GIF frames per second"
+    )
+    rep.add_argument(
+        "--stride", type=int, default=1,
+        help="Use every Nth recorded snapshot for the GIF",
+    )
+    rep.add_argument(
+        "--list", action="store_true",
+        help="List available frame ticks and exit",
+    )
+    rep.add_argument(
+        "--db", default=str(DEFAULT_DB_PATH), help="SQLite database path"
+    )
+
     bench = sub.add_parser(
         "benchmark", help="Run the rule-based agent on benchmark worlds"
     )
@@ -1257,6 +1285,39 @@ def _cmd_rl_health(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_replay(args: argparse.Namespace) -> int:
+    """Sprint 48: replay recorded snapshot history."""
+    from .timewalk import list_frame_ticks, load_frame
+
+    store = WorldStore(args.db)
+    try:
+        if args.at is not None:
+            frame = load_frame(store, args.world_id, args.at)
+            s = frame.sim
+            living = [x for x in s.settlements if x.is_alive]
+            print(f"frame @ tick {frame.tick}")
+            for x in sorted(living, key=lambda y: y.name):
+                print(f"  [{x.name}] pop {x.population} era {x.era}")
+            return 0
+        ticks = list_frame_ticks(store, args.world_id)
+        if not ticks:
+            print(f"no snapshots recorded for world {args.world_id}",
+                  file=sys.stderr)
+            return 1
+        print(
+            f"{len(ticks)} frames: t{ticks[0]}..t{ticks[-1]}"
+        )
+        if args.gif:
+            from .timewalk import export_replay_gif
+
+            path = export_replay_gif(store, args.world_id, args.gif,
+                                     fps=args.fps, stride=args.stride)
+            print(f"GIF written to {path}")
+    finally:
+        store.close()
+    return 0
+
+
 def cmd_undo(args: argparse.Namespace) -> int:
     """Sprint 43: revert to the last pre-intervention snapshot, either in
     place or into a branch world (alternate timeline)."""
@@ -2101,6 +2162,7 @@ def main(argv: list[str] | None = None) -> int:
         "map": cmd_map,
         "chronicle": cmd_chronicle,
         "timeline": cmd_timeline,
+        "replay": cmd_replay,
         "benchmark": cmd_benchmark,
         "rl": cmd_rl,
         "llm": cmd_llm,
