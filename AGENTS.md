@@ -833,6 +833,21 @@ Agents replace auto-rules; the frozen RL contract is born
 - **[NOTE] Curves come from in-RAM epoch history**; reloading a saved
   world starts epochs fresh (documented S45 limitation).
 
+### Session 58 - Sprint 54 follow-up (this session)
+- Resumed from an exported session: user-reported BLACK MAP after
+  world creation in the packaged exe. Probe vs the live exe proved
+  /api/grid data perfect -> client-side rendering failure, invisible
+  because pywebview has no console.
+- drawMap hardened (payload guards, base coat so canvas never sits
+  transparent-black); all render/refresh failures now surface ON-PAGE
+  via god-result div + window.onerror trap.
+- Fresh-launch flow skips grid fetch until a world exists (no spurious
+  error box). Exe rebuilt; smoke verified hardened JS served + full loop.
+- **[WHY] On-page errors over console**: packaged webview windows have
+  no devtools in normal use - invisible logging made this undiagnosable.
+- **[NOTE] Root cause unconfirmed until retest**; any remaining failure
+  now prints its exact message on-screen.
+
 ### Session 56 - Sprint 53 (this session)
 - web/ static frontend (vanilla JS + canvas, zero build
   toolchain): map with overlays, step/run/pause controls, god panel
