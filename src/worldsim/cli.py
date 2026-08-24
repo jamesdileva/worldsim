@@ -243,6 +243,18 @@ def build_parser() -> argparse.ArgumentParser:
         "--db", default=str(DEFAULT_DB_PATH), help="SQLite database path"
     )
 
+    live = sub.add_parser(
+        "live",
+        help="Interactive World Simulator shell (Sprint 51)",
+    )
+    live.add_argument(
+        "--world-id", default=None,
+        help="Optional world to load at startup",
+    )
+    live.add_argument(
+        "--db", default=str(DEFAULT_DB_PATH), help="SQLite database path"
+    )
+
     chron = sub.add_parser(
         "chronicle",
         help="Per-civilization histories + population curves (Sprint 45)",
@@ -1436,6 +1448,26 @@ def cmd_compare_worlds(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_live(args: argparse.Namespace) -> int:
+    """Sprint 51: interactive living-world shell."""
+    from .live import start_live_shell
+
+    store = WorldStore(args.db)
+    try:
+        sim = None
+        if args.world_id:
+            try:
+                sim = _load_sim_from_store(store, args.world_id)
+            except Exception as exc:
+                print(f"could not load {args.world_id!r}: {exc}",
+                      file=sys.stderr)
+                return 1
+        start_live_shell(store=store, world_id=args.world_id, sim=sim)
+    finally:
+        store.close()
+    return 0
+
+
 def cmd_undo(args: argparse.Namespace) -> int:
     """Sprint 43: revert to the last pre-intervention snapshot, either in
     place or into a branch world (alternate timeline)."""
@@ -2280,6 +2312,7 @@ def main(argv: list[str] | None = None) -> int:
         "map": cmd_map,
         "chronicle": cmd_chronicle,
         "timeline": cmd_timeline,
+        "live": cmd_live,
         "replay": cmd_replay,
         "compare": cmd_compare_worlds,
         "benchmark": cmd_benchmark,

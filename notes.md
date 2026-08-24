@@ -5,6 +5,44 @@ Decisions worth remembering are marked **[DECISION]**.
 
 ---
 
+## Session 54 — 2026-08-23 — Sprint 51: Interactive Shell (`worldsim live`)
+
+**What was built**
+- `live.py`: stdlib `cmd`-based WorldShell owning one world in memory:
+  - lifecycle: `new [name] [--seed --size --settlements]`, `save
+    [id]`, `load <id>`, `branch <id>` (skip_entity_rows coexistence),
+    `quit`
+  - time: `step [n]`, `watch [interval]` (Ctrl+C pauses)
+  - inspect: `status`, `map [crop]`, `panels`, `chronicle [name]`,
+    `timeline [limit]`
+  - god surface with the SAME handlers + undo-point capture as the CLI:
+    smite (y/n confirm ≥25), bless <name> <resource|happiness>, nuke
+    (always confirms), disaster, spawn, freeze, terraform [region]
+  - session `undo` restores the last pre-mutation state; prompt live-
+    updates (`myworld@t500>`)
+- CLI entry: `worldsim live [--world-id W]` loads a saved world at start.
+- Live smoke: full play session (new → step → chronicle → smite → undo
+  → bless → spawn → save → branch) ran cleanly through the shell.
+- Bug fixed from smoke: status lines lacked settlement names.
+- 16 new tests (drive shell via onecmd; confirmations monkeypatched).
+  Fast suite: 643 passing.
+
+### Decisions
+
+- **[DECISION] Undo swaps in a new Simulation object** (from_state_json)
+  — callers must re-resolve settlements by name after undo; pinned by
+  test to keep semantics explicit.
+- **[DECISION] Session undo is separate from persisted undo points**:
+  _commit_mutation both writes the store row AND stages an in-session
+  restore pointer; 'undo' consumes the pointer once per intervention,
+  matching CLI behavior.
+- **[DECISION] y/n confirmation in-shell replaces --force flags**: same
+  thresholds (smite ≥25, nuke always), friendlier interface.
+
+---
+
+## Session 53 — 2026-08-23 — Phase 9 scoping
+
 ## Session 50 — 2026-08-23 — Sprint 48: Replay System
 
 **What was built**
