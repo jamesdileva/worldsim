@@ -826,6 +826,20 @@ Agents replace auto-rules; the frozen RL contract is born
 - **[NOTE] Curves come from in-RAM epoch history**; reloading a saved
   world starts epochs fresh (documented S45 limitation).
 
+### Session 53
+- Phase 9 scoped: The World Simulator App (Sprints 51–54).
+- Desktop layer decided: pywebview + PyInstaller over a local web
+  backend (Python-only, ~20 MB exe) after weighing Electron (~200 MB
+  Chromium + Node toolchain) and a Textual TUI.
+- Sprint plan: S51 interactive live shell (stdlib cmd REPL owning
+  one world in memory), S52 FastAPI serve command (REST+WS over the
+  live sim), S53 browser frontend served by it, S54 packaged .exe.
+- Intelligence phase renumbered Phase 9 -> 10; Experimental -> 11.
+- **[DECISION] One web backend, swappable frontend**: the API is the
+  product; any future UI mounts on the same endpoints.
+- **[DECISION] All interfaces share god/undo code paths**: CLI, live
+  shell, and HTTP surface must keep identical audit/undo semantics.
+
 ---
 
 ## Conventions
