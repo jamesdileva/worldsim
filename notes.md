@@ -5,6 +5,38 @@ Decisions worth remembering are marked **[DECISION]**.
 
 ---
 
+## Session 46 — 2026-08-23 — Sprint 44: Advanced Visualization (Phase 8 begins)
+
+**What was built**
+- `visualization.py`:
+  - `render_ascii_map` — deterministic glyph priority (contamination !
+    > settlement initial > ruin X > road # > building b > terrain
+    glyph), optional crop window with edge clamping, header carries
+    tick/seed; byte-identical for identical worlds
+  - `render_settlement_panel` — pop/army/fort/era/happiness/techs with
+    FROZEN flag
+  - `export_map_png` — fixed terrain palette, population-scaled
+    settlement markers with name labels, roads/buildings/ruins marks;
+    matplotlib Agg; **byte-identical PNGs** across exports of the same
+    world
+- CLI: `worldsim map --world-id [--x0 --y0 --x1 --y1] [--png] [--panels]`
+- Live smoke on the S43 test world: cropped region map showed roads,
+  buildings, settlement initials + legend; panels printed; PNG written.
+- Phase 8 plan docs: Sprint 44 detailed (S45–50 themed, pending scope).
+- 12 new tests. Fast suite: 569 passing.
+
+### Decisions
+
+- **[DECISION] Byte-deterministic PNG export**: fixed palette keyed by
+  terrain value + Agg backend makes even binary output reproducible —
+  in the spirit of "identical worlds produce identical everything".
+- **[DECISION] Glyph priority puts contamination above settlements**:
+  a ! over your capital's letter is exactly the alarm a map should raise.
+- **[WHY] Crop windows clamp silently**: callers naturally pass
+  exclusive-style bounds; clamping beats crashing.
+
+---
+
 ## Session 45 — 2026-08-23 — Sprint 43: Timeline Branching / Undo (Phase 7 complete)
 
 **What was built**

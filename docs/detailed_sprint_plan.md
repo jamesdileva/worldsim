@@ -859,6 +859,28 @@ epoch history, memoized hot paths, soak-tested.
 - Memory growth roughly flat once warm (<100 MB per 2k traced ticks)
 - Determinism preserved at horizon; frozen contract untouched
 
+### Sprint 44 — Advanced Visualization (detailed)
+
+**Duration:** 1 week
+**Deliverable:** §17 world map: ASCII rendering with overlays + PNG
+export, settlement panels.
+
+**Tasks:**
+- `visualization.py`: `render_ascii_map` with deterministic glyph
+  priority (contamination ! > settlement initial > ruin X > road # >
+  building b > terrain glyph), optional crop window, header with
+  tick/seed; `render_settlement_panel`; `export_map_png` (fixed
+  terrain palette, population-scaled settlement markers, roads/
+  buildings/ruins marks)
+- CLI `worldsim map --world-id [--x0 --y0 --x1 --y1] [--png] [--panels]`
+- Determinism: byte-identical maps AND byte-identical PNG bytes for
+  identical worlds
+
+**Acceptance criteria:**
+- Overlays proven (road/building/ruin/contamination/settlement glyphs)
+- PNG round-trips byte-exact across exports of the same world
+- Crop windows clamp to the grid gracefully
+
 ### Sprint 37 — Long-Term Historical Simulation (detailed)
 
 **Duration:** 1 week

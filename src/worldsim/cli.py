@@ -208,6 +208,35 @@ def build_parser() -> argparse.ArgumentParser:
         "--db", default=str(DEFAULT_DB_PATH), help="SQLite database path"
     )
 
+    map_cmd = sub.add_parser(
+        "map",
+        help="Render an ASCII world map and/or PNG export (Sprint 44)",
+    )
+    map_cmd.add_argument("--world-id", required=True)
+    map_cmd.add_argument(
+        "--x0", type=int, default=None, help="Crop window left"
+    )
+    map_cmd.add_argument(
+        "--y0", type=int, default=None, help="Crop window top"
+    )
+    map_cmd.add_argument(
+        "--x1", type=int, default=None, help="Crop window right"
+    )
+    map_cmd.add_argument(
+        "--y1", type=int, default=None, help="Crop window bottom"
+    )
+    map_cmd.add_argument(
+        "--png", default=None,
+        help="Optional output .png path for a full-color map export",
+    )
+    map_cmd.add_argument(
+        "--panels", action="store_true",
+        help="Also print one detail panel per living settlement",
+    )
+    map_cmd.add_argument(
+        "--db", default=str(DEFAULT_DB_PATH), help="SQLite database path"
+    )
+
     bench = sub.add_parser(
         "benchmark", help="Run the rule-based agent on benchmark worlds"
     )
@@ -966,6 +995,72 @@ def cmd_god(args: argparse.Namespace) -> int:
     print(f"  target: {target}")
     print(f"  before: {before}")
     print(f"  after:  {after}")
+    return 0
+
+
+def _load_sim_from_store(store: WorldStore, world_id: str):
+    """Shared loader: latest snapshot -> runnable Simulation."""
+    (
+        world,
+        settlements,
+        routes,
+        ruins,
+        disasters,
+        relations,
+        contested,
+        debuffs,
+        events,
+        diplomacy,
+        strategy_memory,
+        highways,
+        treaties,
+        zones,
+    ) = store.load_latest_snapshot(world_id)
+    return simulation_from_state(
+        world,
+        settlements,
+        routes,
+        ruins,
+        disasters,
+        relations=relations,
+        contested=contested,
+        building_debuffs=debuffs,
+        event_log=events,
+        diplomacy=diplomacy,
+        strategy_memory=strategy_memory,
+        highway_projects=highways,
+        treaties=treaties,
+        contamination_zones=zones,
+    )
+
+
+def cmd_map(args: argparse.Namespace) -> int:
+    """Sprint 44: ASCII map + optional PNG export + settlement panels."""
+    from .visualization import (
+        LEGEND,
+        export_map_png,
+        render_ascii_map,
+        render_settlement_panel,
+    )
+
+    store = WorldStore(args.db)
+    try:
+        sim = _load_sim_from_store(store, args.world_id)
+    finally:
+        store.close()
+
+    print(render_ascii_map(sim, x0=args.x0, y0=args.y0, x1=args.x1,
+                           y1=args.y1))
+    print(LEGEND)
+    if args.panels:
+        for s in sorted(
+            (x for x in sim.settlements if x.is_alive), key=lambda x: x.name
+        ):
+            print()
+            print(render_settlement_panel(sim, s))
+    if args.png:
+        path = export_map_png(sim, args.png)
+        print(f"\nPNG export written to {path}")
     return 0
 
 
@@ -1808,6 +1903,7 @@ def main(argv: list[str] | None = None) -> int:
         "god": cmd_god,
         "events": cmd_events,
         "undo": cmd_undo,
+        "map": cmd_map,
         "benchmark": cmd_benchmark,
         "rl": cmd_rl,
         "llm": cmd_llm,
