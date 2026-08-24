@@ -35,8 +35,8 @@ Phase 10), **Phase 7 ✅ COMPLETE** (S38 god controls polish, S39 disaster toolk
 S40 resource manipulation depth, S41 terrain manipulation, S42 nuclear
 events, S43 timeline branching/undo with byte-exact restore + branch
 timelines; sprint docs expanded through Phase 10), **Phase 8 in
-progress** (S44 advanced visualization done; S45 civilization
-histories done; S46 event timeline done).
+progress** (S44 visualization, S45 civilization histories, S46 event
+timeline, S47 learning dashboard done).
 
 **Test tiers:** `pytest` = fast suite (~250 tests, ~3–5 min);
 `pytest -m slow` = long integration runs.
@@ -96,6 +96,7 @@ histories done; S46 event timeline done).
 | `a3bca56` | 44 | Advanced visualization: deterministic ASCII maps + overlays, settlement panels, byte-reproducible PNG exports (**Phase 8 begins**) |
 | `a67b88b` | 45 | Civilization histories: event-log chronicles, civilizations summary, population curves + chart export |
 | `163daef` | 46 | Event timeline: categorized chronological view, filters, stacked category histogram chart |
+| `9775b5e` | 47 | Learning dashboard: offline training-health view, entropy/EV/KL flags, 2x2 panels + markdown report |
 
 ---
 
@@ -749,6 +750,23 @@ Agents replace auto-rules; the frozen RL contract is born
   start-to-finish; newest-events views can slice from the end.
 - **[WHY] Zero-filled windows**: every category series exists in every
   window — charts work with no padding logic at the consumer side.
+
+### Session 49 — Sprint 47 (this session)
+- `build_learning_dashboard(store, gens)`: consolidated OFFLINE
+  training-health view — reads only the latest checkpoint per generation
+  plus its train-time `_summary.json` (no models, no rollouts);
+  per-generation return trend vs previous, entropy-collapse detection
+  (threshold 0.1), EV bands (good ≥0.7 / ok ≥0.4 / poor), KL warning
+  (>0.03); overall status regressed > watch > healthy.
+- 2×2 health panels PNG (return / final entropy with collapse line / EV
+  with good line / ticks-per-second) + markdown table report.
+- CLI: `rl health --gens --png --markdown`.
+- Live on real gen1r→gen3r artifacts: returns 6.5→10.2→13.9 (up),
+  entropy healthy, EV ok→good, gen3r KL=0.033 flagged — matching the
+  S20 remediation findings exactly. Fast suite: 607 passing.
+- **[DECISION] Offline by construction**: the dashboard never loads
+  models or runs rollouts — instant answers from stored artifacts;
+  expensive evaluation stays in rl dashboard/evaluate.
 
 ---
 
