@@ -38,7 +38,8 @@ timelines; sprint docs expanded through Phase 10), **Phase 8 ✅ COMPLETE** (S44
 S46 event timeline, S47 learning dashboard, S48 replay system, S49 world
 comparison, S50 long-running autonomous world done). **S51 live shell
 DONE** (interactive World Simulator shell — one session owns one world;
-S52 serve + S53 web frontend + S54 .exe packaging remain).
+S52 serve DONE (FastAPI REST+WS over a live world).
+S53 web frontend + S54 .exe packaging remain.
 **Phase 9 PLANNED** (The World Simulator App, Sprints 51–54:
 live shell -> serve web API -> browser frontend -> pywebview +
 PyInstaller .exe; former Advanced-Intelligence phase renumbered to
@@ -107,6 +108,7 @@ Phase 10).
 | `3b894fc` | 49 | World comparison: structural diff (settlements/counters/events), markdown report, comparison chart |
 | `aa21dbb` | 50 | Long-running autonomous world: simulate --report-dir living-world bundle; visual verification via replay GIF (**roadmap complete**) |
 | `60e7300` | 51 | Interactive shell: worldsim live REPL owning one world in memory — step/watch/inspect + full god surface with confirmations, session undo, branch (**Phase 9 begins**) |
+| `dcd8fd7` | 52 | Local web API: FastAPI serve over a live world, REST+WS endpoints, HTTP 428 confirmation gates, thread-safe store |
 
 ---
 
@@ -828,6 +830,29 @@ Agents replace auto-rules; the frozen RL contract is born
   roadmap's "living ant farm" vision, end to end.
 - **[NOTE] Curves come from in-RAM epoch history**; reloading a saved
   world starts epochs fresh (documented S45 limitation).
+
+### Session 55 - Sprint 52 (this session)
+- webapp.py: WorldSession (mirrors live shell) wrapped by a
+  FastAPI factory: GET status/state/map.png/chronicle/timeline;
+  POST step/run/pause/undo/save/load/god/{action}; WS /ws/status.
+- God dispatch routes through the SAME handlers + undo-point
+  capture; catastrophic actions demand confirm:true -> HTTP 428.
+- **Real bug found**: WorldStore used a raw sqlite3 connection —
+  cross-thread use fails, and uvicorn runs handlers in a threadpool,
+  so this would break production too. Fixed with
+  check_same_thread=False + explicit lock; reads via _query().
+- CLI: worldsim serve [--world-id --host --port]; FastAPI+uvicorn
+  lazy imports keep the rest dependency-light.
+- Live verification over real HTTP vs the year-54 S50 world:
+  step/god/undo/timeline/map.png exercised; 428 gate verified;
+  clean shutdown. 10 new tests via TestClient. Fast suite: 653 passing.
+- **[DECISION] Single serialized SQLite connection + lock**: one
+  world, one writer; request threads share the store safely without
+  a connection pool.
+- **[DECISION] HTTP 428 for missing confirmation**: semantically
+  precondition-required; clients retry with confirm=true.
+- **[WHY] Session mirrors live.py, not shares code**: both are thin
+  owners of sim+undo state; semantics kept identical by test.
 
 ### Session 54 - Sprint 51 (this session)
 - live.py: stdlib cmd-based WorldShell owning one world in memory:
