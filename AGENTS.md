@@ -36,7 +36,8 @@ S40 resource manipulation depth, S41 terrain manipulation, S42 nuclear
 events, S43 timeline branching/undo with byte-exact restore + branch
 timelines; sprint docs expanded through Phase 10), **Phase 8 in
 progress** (S44 visualization, S45 civilization histories, S46 event
-timeline, S47 learning dashboard, S48 replay system done).
+timeline, S47 learning dashboard, S48 replay system, S49 world
+comparison done).
 
 **Test tiers:** `pytest` = fast suite (~250 tests, ~3–5 min);
 `pytest -m slow` = long integration runs.
@@ -98,6 +99,7 @@ timeline, S47 learning dashboard, S48 replay system done).
 | `163daef` | 46 | Event timeline: categorized chronological view, filters, stacked category histogram chart |
 | `9775b5e` | 47 | Learning dashboard: offline training-health view, entropy/EV/KL flags, 2x2 panels + markdown report |
 | `6662500` | 48 | Replay system: timewalk module over the snapshot trail, exact-tick frames, animated GIF export |
+| `3b894fc` | 49 | World comparison: structural diff (settlements/counters/events), markdown report, comparison chart |
 
 ---
 
@@ -786,6 +788,21 @@ Agents replace auto-rules; the frozen RL contract is born
   replayed world never touches stored snapshots or other frames.
 - **Naming lesson upgraded to SOURCE modules**: check git status before
   creating any new file.
+
+### Session 51 — Sprint 49 (this session)
+- `worldcompare.py`: `compare_worlds(sim_a, sim_b)` — per-settlement
+  field-level diff, world counters, event divergence keyed by
+  (tick, type, description) so diffs are stable across save/load;
+  `identical` flag; markdown table; byte-deterministic grouped-bar
+  chart per shared settlement.
+- CLI: `worldsim compare --a W1 --b W2 [--png] [--markdown]`.
+- Live smoke on the S43 world + its branch: post-undo both compared
+  identical (correct — same fork point); after blessing the branch,
+  diff showed Brazemi food_stock divergence and the divine event only
+  in B. Fast suite: 621 passing.
+- **[WHY] Event keys include descriptions**: two worlds can log the
+  same type at the same tick for different settlements — tick+type
+  alone would mask real divergence.
 
 ---
 
