@@ -145,11 +145,21 @@ def summarize_world(sim, tier: str = TIER_FULL,
     wars = _war_lines(sim)
     if wars:
         sections.append("Wars: " + "; ".join(wars))
+    from .disasters import ContaminationZone
+
+    active_zones = [
+        z for z in sim.contamination_zones if z.is_active(sim.tick)]
     disasters = [
         d.type.name.lower() for d in sim.active_disasters()
     ]
     if disasters:
         sections.append("Active disasters: " + ", ".join(disasters))
+    if active_zones:
+        sections.append(
+            f"Contamination: {len(active_zones)} active zone(s) — "
+            f"yields suppressed until tick "
+            f"{max(z.end_tick for z in active_zones)}"
+        )
 
     routes = sim.active_routes()
     name_by_id = {s.id: s.name for s in sim.settlements}

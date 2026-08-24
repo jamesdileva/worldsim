@@ -66,6 +66,7 @@ class StubSim:
         self.event_log = []
         self.settlements = []
         self.highway_projects = []
+        self.contamination_zones = []
         self.treaties = []
         self._buildings = {}
         self._territory = {}

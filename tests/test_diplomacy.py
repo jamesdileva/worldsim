@@ -343,7 +343,7 @@ def test_diplomacy_state_persists():
             diplomacy=sim.diplomacy,
         )
         snap = store.load_latest_snapshot(wid)
-        diplo = snap[-4]  # ...diplomacy, memory, highways, treaties
+        diplo = snap[-5]  # ...diplomacy, memory, highways, treaties, zones
         assert diplo.at_war(a.id, b.id)
         assert diplo.rep(a.id) == pytest.approx(-25.0)
     finally:

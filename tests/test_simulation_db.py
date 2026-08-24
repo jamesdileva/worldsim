@@ -12,7 +12,7 @@ def test_settlement_round_trip_exact():
         sim.step()
 
     world2, settlements, routes, ruins, disasters, rels, contest, \
-        debuffs, events, diplo, memory, highways, treaties = \
+        debuffs, events, diplo, memory, highways, treaties, zones = \
         deserialize_world(serialize_world(sim.world, sim.settlements))
     assert len(settlements) == 1
     r = settlements[0]
@@ -33,7 +33,7 @@ def test_settlement_round_trip_exact():
     assert len(rels.pairs()) == 0
     assert contest == {} and debuffs == [] and events == []
     assert len(diplo.wars) == 0 and memory == {}
-    assert highways == [] and treaties == []
+    assert highways == [] and treaties == [] and zones == []
 
 
 def test_store_persists_settlement_rows(tmp_path):

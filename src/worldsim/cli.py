@@ -130,6 +130,7 @@ def build_parser() -> argparse.ArgumentParser:
             "bless_land",
             "terraform",
             "terraform_region",
+            "nuke",
         ],
         help="Intervention to apply",
     )
@@ -167,6 +168,10 @@ def build_parser() -> argparse.ArgumentParser:
              "fertile/forest/mountain)",
     )
     god.add_argument(
+        "--confirm", action="store_true",
+        help="Second confirmation for nuclear strikes (requires --force too)",
+    )
+    god.add_argument(
         "--settlement-index", type=int, default=0, help="Target settlement index"
     )
     god.add_argument("--amount", type=int, default=5, help="Magnitude of intervention")
@@ -176,7 +181,7 @@ def build_parser() -> argparse.ArgumentParser:
     god.add_argument(
         "--force",
         action="store_true",
-        help="Confirm catastrophic actions (§16.4: smite >= 25 population)",
+        help="Confirm catastrophic actions (Â§16.4: smite >= 25 population)",
     )
     god.add_argument(
         "--db", default=str(DEFAULT_DB_PATH), help="SQLite database path"
@@ -454,6 +459,7 @@ def _autosave(store: WorldStore, args, sim: Simulation, world_id: str | None) ->
         strategy_memory=sim.strategy_memory,
         highway_projects=sim.highway_projects,
         treaties=sim.treaties,
+        contamination_zones=sim.contamination_zones,
     )
     return store.save_world_with_id(
         world_id if world_id is not None else str(uuid.uuid4()), sim.world, **kwargs
@@ -628,6 +634,7 @@ def cmd_step(args: argparse.Namespace) -> int:
             strategy_memory,
             highways,
             treaties,
+            zones,
         ) = store.load_latest_snapshot(args.world_id)
         sim = simulation_from_state(
             world,
@@ -643,6 +650,7 @@ def cmd_step(args: argparse.Namespace) -> int:
             strategy_memory=strategy_memory,
             highway_projects=highways,
             treaties=treaties,
+            contamination_zones=zones,
         )
         before_tick = sim.tick
         sim.run(args.ticks)
@@ -661,6 +669,7 @@ def cmd_step(args: argparse.Namespace) -> int:
             strategy_memory=sim.strategy_memory,
             highway_projects=sim.highway_projects,
             treaties=sim.treaties,
+            contamination_zones=sim.contamination_zones,
         )
         store.insert_world_events(sim.event_log)
     finally:
@@ -691,6 +700,7 @@ def cmd_god(args: argparse.Namespace) -> int:
             strategy_memory,
             highways,
             treaties,
+            zones,
         ) = store.load_latest_snapshot(args.world_id)
         sim = simulation_from_state(
             world,
@@ -706,11 +716,12 @@ def cmd_god(args: argparse.Namespace) -> int:
             strategy_memory=strategy_memory,
             highway_projects=highways,
             treaties=treaties,
+            contamination_zones=zones,
         )
         target = None
         before: dict | None = None
         after: dict | None = None
-        # §16.4: confirmation for catastrophic actions.
+        # Â§16.4: confirmation for catastrophic actions.
         if args.action == "smite" and args.amount >= 25 and not args.force:
             print(
                 f"smite of {args.amount} population is catastrophic; "
@@ -725,6 +736,19 @@ def cmd_god(args: argparse.Namespace) -> int:
                 file=sys.stderr,
             )
             return 2
+        if args.action == "nuke":
+            # §16.4: nuclear strikes demand TWO confirmations.
+            missing = [
+                flag for flag, given in (
+                    ("--force", args.force), ("--confirm", args.confirm))
+                if not given
+            ]
+            if missing:
+                print(
+                    f"nuclear strike requires both {' and '.join(missing)}",
+                    file=sys.stderr,
+                )
+                return 2
         if args.action == "destroy":
             if args.x is None or args.y is None:
                 print("destroy requires --x and --y", file=sys.stderr)
@@ -834,6 +858,12 @@ def cmd_god(args: argparse.Namespace) -> int:
             except ValueError as exc:
                 print(str(exc), file=sys.stderr)
                 return 1
+        elif args.action == "nuke":
+            if args.x is None or args.y is None:
+                print("nuke requires --x and --y", file=sys.stderr)
+                return 2
+            before, after = sim.god_nuke(args.x, args.y)
+            target = f"({args.x},{args.y})"
         else:
             if not (0 <= args.settlement_index < len(sim.settlements)):
                 print("invalid --settlement-index", file=sys.stderr)
@@ -881,6 +911,7 @@ def cmd_god(args: argparse.Namespace) -> int:
             strategy_memory=sim.strategy_memory,
             highway_projects=sim.highway_projects,
             treaties=sim.treaties,
+            contamination_zones=sim.contamination_zones,
         )
     finally:
         store.close()
@@ -1095,7 +1126,7 @@ def _cmd_rl_evaluate(args: argparse.Namespace) -> int:
         f"({results['reward_win_fraction']*100:.0f}%)\n"
         f"  mean baseline survival: {results['mean_baseline_survival']} ticks\n"
         f"  mean policy survival:   {results['mean_policy_survival']} ticks\n"
-        f"  mean peak pop — baseline {results['mean_baseline_peak_pop']:.0f} "
+        f"  mean peak pop â€” baseline {results['mean_baseline_peak_pop']:.0f} "
         f"vs policy {results['mean_policy_peak_pop']:.0f}"
     )
     sig_lines = []
@@ -1202,7 +1233,7 @@ def _cmd_rl_dashboard(args: argparse.Namespace) -> int:
     generations = [g.strip() for g in args.gens.split(",") if g.strip()]
     print(
         f"Evaluating {len(generations)} generations "
-        f"({', '.join(generations)}) on {args.worlds} worlds × "
+        f"({', '.join(generations)}) on {args.worlds} worlds Ã— "
         f"{args.ticks} ticks..."
     )
     report = compare_generations(
@@ -1355,9 +1386,9 @@ def _cmd_rl_head_to_head(args: argparse.Namespace) -> int:
         f"over {results['worlds']} shared worlds:\n"
         f"  A wins: {results['a_wins']} | B wins: {results['b_wins']} | "
         f"ties: {results['ties']}\n"
-        f"  mean cumulative reward — A {results['mean_reward_a']} vs "
+        f"  mean cumulative reward â€” A {results['mean_reward_a']} vs "
         f"B {results['mean_reward_b']}\n"
-        f"  mean territory share — A {results['mean_territory_share_a']} "
+        f"  mean territory share â€” A {results['mean_territory_share_a']} "
         f"vs B {results['mean_territory_share_b']}"
     )
     for metric in ("reward_permutation_p", "territory_permutation_p"):
@@ -1522,7 +1553,7 @@ def _cmd_rl_run(args: argparse.Namespace) -> int:
             ax.plot(range(1, len(curve) + 1), curve, label=f"ep {i}", alpha=0.7)
         ax.set_xlabel("tick")
         ax.set_ylabel("reward")
-        ax.set_title("Reward per tick — benchmark episodes")
+        ax.set_title("Reward per tick â€” benchmark episodes")
         ax.legend(loc="upper right", fontsize=8)
         fig.tight_layout()
         fig.savefig(args.plot, dpi=120)
@@ -1562,7 +1593,7 @@ def cmd_llm(args: argparse.Namespace) -> int:
                     f"installed"
                 )
         else:
-            print("Server unreachable — simulation continues unaffected "
+            print("Server unreachable â€” simulation continues unaffected "
                   "(graceful degradation).")
         return 0
 
@@ -1598,7 +1629,7 @@ def _cmd_llm_compare(args: argparse.Namespace) -> int:
 
     client = OllamaClient(config)
     if not client.is_available():
-        print("Ollama unreachable — comparison would be meaningless with "
+        print("Ollama unreachable â€” comparison would be meaningless with "
               "both arms identical. Start the server and retry.",
               file=sys.stderr)
         return 1

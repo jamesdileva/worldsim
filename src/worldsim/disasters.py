@@ -23,6 +23,15 @@ DROUGHT_DURATION_TICKS = 200
 DROUGHT_FARM_MULTIPLIER = 0.5
 PLAGUE_MORTALITY = 0.30
 
+# Nuclear events (Sprint 42).
+NUKE_RADIUS = 12
+NUKE_POPULATION_FRACTION = 0.6   # share of pop annihilated in the fireball
+CONTAMINATION_TICKS = 7_300      # ~20 years at ~365 ticks/year
+CONTAMINATION_YIELD_FACTOR = 0.25
+# Outweighs the baseline happiness recovery rate (~0.005/tick): despair
+# from living in fallout beats ordinary good news.
+CONTAMINATION_HAPPINESS_DECAY = 0.01  # per tick while inside a zone
+
 
 def season_of(tick: int) -> str:
     return SEASONS[(tick // TICKS_PER_SEASON) % len(SEASONS)]
@@ -56,6 +65,27 @@ class DisasterEvent:
     @property
     def end_tick(self) -> int:
         return self.start_tick + self.duration
+
+    def is_active(self, tick: int) -> bool:
+        return self.start_tick <= tick < self.end_tick
+
+    def covers(self, x: int, y: int) -> bool:
+        return max(abs(x - self.center_x), abs(y - self.center_y)) <= self.radius
+
+
+@dataclass
+class ContaminationZone:
+    """Long-lasting fallout from a nuclear event (Sprint 42).
+
+    Suppresses food yields inside the zone and bleeds happiness from
+    affected settlements until it decays on a fixed schedule."""
+
+    center_x: int
+    center_y: int
+    radius: int
+    start_tick: int
+    end_tick: int
+    id: str = field(default_factory=lambda: str(uuid.uuid4()))
 
     def is_active(self, tick: int) -> bool:
         return self.start_tick <= tick < self.end_tick

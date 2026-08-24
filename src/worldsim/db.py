@@ -1,4 +1,4 @@
-"""SQLite persistence: worlds and snapshots tables (architecture_detailed.md ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â§24.1).
+"""SQLite persistence: worlds and snapshots tables (architecture_detailed.md ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â§24.1).
 
 World state is stored as compressed JSON snapshots. Tile arrays are serialized
 as base64-encoded raw bytes so round-trips are exact (byte-level determinism).
@@ -339,6 +339,8 @@ def _encode_highway(p) -> dict:
     }
 
 
+from .disasters import ContaminationZone
+
 def _encode_treaty(t) -> dict:
     return {
         "id": t.id,
@@ -392,6 +394,7 @@ def serialize_world(
     strategy_memory: dict | None = None,
     highway_projects: list | None = None,
     treaties: list | None = None,
+    contamination_zones: list | None = None,
 ) -> str:
     state = {
         "seed": world.seed,
@@ -436,6 +439,17 @@ def serialize_world(
             f"{y},{x}": bonus
             for (y, x), bonus in (world.tile_food_bonus or {}).items()
         },
+        "contamination_zones": [
+            {
+                "center_x": z.center_x,
+                "center_y": z.center_y,
+                "radius": z.radius,
+                "start_tick": z.start_tick,
+                "end_tick": z.end_tick,
+                "id": z.id,
+            }
+            for z in (contamination_zones or [])
+        ],
     }
     return json.dumps(state, sort_keys=True)
 
@@ -501,6 +515,17 @@ def deserialize_world(
         _decode_highway(obj) for obj in state.get("highway_projects", [])
     ]
     treaties = [_decode_treaty(obj) for obj in state.get("treaties", [])]
+    contamination_zones = [
+        ContaminationZone(
+            center_x=obj["center_x"],
+            center_y=obj["center_y"],
+            radius=obj["radius"],
+            start_tick=obj["start_tick"],
+            end_tick=obj["end_tick"],
+            id=obj["id"],
+        )
+        for obj in state.get("contamination_zones", [])
+    ]
     world.tile_food_bonus = {
         (int(y), int(x)): float(bonus)
         for key, bonus in state.get("tile_food_bonus", {}).items()
@@ -520,6 +545,7 @@ def deserialize_world(
         strategy_memory,
         highway_projects,
         treaties,
+        contamination_zones,
     )
 
 
@@ -561,6 +587,7 @@ class WorldStore:
         strategy_memory: dict | None = None,
         highway_projects: list | None = None,
         treaties: list | None = None,
+        contamination_zones: list | None = None,
     ) -> str:
         """Insert a world row, write a snapshot, and upsert settlement,
         resource, and trade-route rows."""
@@ -591,6 +618,7 @@ class WorldStore:
                         strategy_memory,
                         highway_projects,
                         treaties,
+                        contamination_zones,
                     ),
                 ),
             )
@@ -698,6 +726,7 @@ class WorldStore:
         strategy_memory: dict | None = None,
         highway_projects: list | None = None,
         treaties: list | None = None,
+        contamination_zones: list | None = None,
     ) -> str:
         """Save under a caller-chosen id (upsert)."""
         if self.world_exists(world_id):
@@ -716,6 +745,7 @@ class WorldStore:
                 strategy_memory=strategy_memory,
                 highway_projects=highway_projects,
                 treaties=treaties,
+                contamination_zones=contamination_zones,
             )
             return world_id
         created_at = datetime.now(timezone.utc).isoformat()
@@ -743,6 +773,7 @@ class WorldStore:
                         strategy_memory,
                         highway_projects,
                         treaties,
+                        contamination_zones,
                     ),
                 ),
             )
@@ -800,6 +831,7 @@ class WorldStore:
         strategy_memory: dict | None = None,
         highway_projects: list | None = None,
         treaties: list | None = None,
+        contamination_zones: list | None = None,
     ) -> None:
         """Write a new snapshot for an existing world and bump last_tick."""
         if not self.world_exists(world_id):
@@ -829,6 +861,7 @@ class WorldStore:
                         strategy_memory,
                         highway_projects,
                         treaties,
+                        contamination_zones,
                     ),
                 ),
             )

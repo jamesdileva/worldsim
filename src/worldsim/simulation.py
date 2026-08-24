@@ -1,6 +1,6 @@
 """Deterministic tick engine: settlements, food, buildings, roads (Sprint 3).
 
-All state transitions are pure functions of (state, tick) — no external RNG
+All state transitions are pure functions of (state, tick) â€” no external RNG
 after spawn (architecture_detailed.md A1).
 """
 
@@ -32,6 +32,7 @@ from .buildings import (
 )
 from .disasters import (
     BASE_EVENT_CHANCE,
+    ContaminationZone,
     DisasterEvent,
     DisasterType,
     DROUGHT_FARM_MULTIPLIER,
@@ -83,7 +84,7 @@ BUILD_PRIORITY = [
 ]
 
 # Workers passively gather a fraction of terrain wood/stone/metal yields on
-# owned tiles each tick — prevents an unrecoverable wood deadlock before
+# owned tiles each tick â€” prevents an unrecoverable wood deadlock before
 # sawmills/mines exist.
 GATHER_RATE = 0.25
 
@@ -109,7 +110,7 @@ EXPERIENCE_BUFFER_MAX = 50_000
 HISTORY_INTERVAL_TICKS = 500
 
 # Competition (Sprint 9): neighbors, raids, contested zones, events.
-# Sprint 11: raised from 48 to 96 — sparse worlds left most settlements
+# Sprint 11: raised from 48 to 96 â€” sparse worlds left most settlements
 # unreachable, which starved trade/diplomacy (and thus strategy emergence).
 NEIGHBOR_SPAWN_DISTANCE = 96
 RAID_BUILDING_DEBUFF_TICKS = 200
@@ -224,7 +225,7 @@ class Simulation:
     # Sprint 10: wars, alliances, peace offers, reputation.
     diplomacy: DiplomacyState = field(default_factory=DiplomacyState)
     _interacted_this_tick: set[str] = field(default_factory=set)
-    # Sprint 11: strategy memory — EMA reward per (archetype, action_id).
+    # Sprint 11: strategy memory â€” EMA reward per (archetype, action_id).
     strategy_memory: dict[tuple[str, int], float] = field(default_factory=dict)
     # Perf: per-tick memo for full-grid scans (buildings/territory/roads).
     _tick_cache: dict = field(default_factory=dict)
@@ -239,6 +240,9 @@ class Simulation:
     treaties: list = field(default_factory=list)
     # Sprint 37: compact epoch history for long-run analysis.
     history: list[dict] = field(default_factory=list)
+    # Sprint 42: nuclear fallout zones (long-lived yield + happiness
+    # debuffs that decay on a fixed schedule).
+    contamination_zones: list = field(default_factory=list)
 
     @property
     def tick(self) -> int:
@@ -555,7 +559,7 @@ class Simulation:
         btype = BuildingType[head]
         site = self.find_building_site(settlement, btype)
         if site is None:
-            # No valid tile — drop the order rather than blocking the queue.
+            # No valid tile â€” drop the order rather than blocking the queue.
             settlement.build_queue.pop(0)
             return
         if self.build_at(settlement, btype, x=site[1], y=site[0]):
@@ -563,7 +567,7 @@ class Simulation:
 
     def _auto_build_rule(self, settlement: Settlement) -> None:
         """Queue the least-built building type that has an affordable valid
-        site — keeps the building mix balanced until agents take over."""
+        site â€” keeps the building mix balanced until agents take over."""
         if settlement.build_queue:
             return
         counts = self.buildings_of(settlement)
@@ -725,7 +729,7 @@ class Simulation:
             if a.id in ids and b.id in ids:
                 return False
         # Trade needs known neighbors: territory contact OR proximity
-        # (Sprint 11 — waiting for physical border contact starved the
+        # (Sprint 11 â€” waiting for physical border contact starved the
         # trading strategy in sparse worlds).
         return any(n.id == b.id for n in self.neighbors_of(a))
 
@@ -845,7 +849,7 @@ class Simulation:
         return [r for r in self.trade_routes if r.active]
 
     # ------------------------------------------------------------------
-    # God Mode (Sprint 6) — interventions return before/after state
+    # God Mode (Sprint 6) â€” interventions return before/after state
     # ------------------------------------------------------------------
 
     def god_smite(self, settlement: Settlement, amount: int) -> tuple[dict, dict]:
@@ -884,12 +888,12 @@ class Simulation:
         return before, after
 
     # ------------------------------------------------------------------
-    # God Mode polish (Sprint 38) — §16 surface completion + audit trail
+    # God Mode polish (Sprint 38) â€” Â§16 surface completion + audit trail
     # ------------------------------------------------------------------
 
     def _divine(self, description: str) -> None:
         """Every intervention leaves a 'divine' event for the audit trail
-        (§16.3 event history / impact tracking)."""
+        (Â§16.3 event history / impact tracking)."""
         self.log_event("divine", [], f"GOD: {description}")
 
     def god_spawn_settlement(
@@ -947,7 +951,7 @@ class Simulation:
         return before, after
 
     # ------------------------------------------------------------------
-    # God Mode depth (Sprint 40) — region targeting + mass operations
+    # God Mode depth (Sprint 40) â€” region targeting + mass operations
     # ------------------------------------------------------------------
 
     def _apply_resource_change(
@@ -1019,7 +1023,7 @@ class Simulation:
     def god_smite_region(
         self, x: int, y: int, radius: int, amount: int
     ) -> tuple[dict, dict]:
-        """Smite every settlement in the circle (catastrophic — CLI gates
+        """Smite every settlement in the circle (catastrophic â€” CLI gates
         on --force)."""
         from .regions import circle_tiles, settlements_with_spawns_in
 
@@ -1089,7 +1093,7 @@ class Simulation:
         return {"region": [x, y, radius]}, result
 
     # ------------------------------------------------------------------
-    # God Mode depth (Sprint 41) — terrain manipulation
+    # God Mode depth (Sprint 41) â€” terrain manipulation
     # ------------------------------------------------------------------
 
     @staticmethod
@@ -1190,6 +1194,96 @@ class Simulation:
         return {"region": [x, y, radius]}, result
 
     # ------------------------------------------------------------------
+    # God Mode depth (Sprint 42) â€” nuclear events
+    # ------------------------------------------------------------------
+
+    def _contaminated_tiles_mask(self) -> np.ndarray | None:
+        """Boolean mask of tiles inside any active fallout zone."""
+        size = self.world.size
+        mask = np.zeros((size, size), dtype=bool)
+        any_active = False
+        tick = self.tick
+        for zone in self.contamination_zones:
+            if not zone.is_active(tick):
+                continue
+            any_active = True
+            y0 = max(0, zone.center_y - zone.radius)
+            y1 = min(size, zone.center_y + zone.radius + 1)
+            x0 = max(0, zone.center_x - zone.radius)
+            x1 = min(size, zone.center_x + zone.radius + 1)
+            mask[y0:y1, x0:x1] = True
+        return mask if any_active else None
+
+    def _settlement_contaminated(self, settlement: Settlement) -> bool:
+        """True while an active fallout zone covers the settlement spawn."""
+        tick = self.tick
+        return any(
+            zone.is_active(tick) and zone.covers(
+                settlement.spawn_x, settlement.spawn_y)
+            for zone in self.contamination_zones
+        )
+
+    def god_nuke(self, x: int, y: int) -> tuple[dict, dict]:
+        """Nuclear strike (Â§16.2): annihilate everything in the blast
+        radius and leave decades of contamination behind."""
+        from .disasters import (
+            CONTAMINATION_TICKS,
+            NUKE_POPULATION_FRACTION,
+            NUKE_RADIUS,
+        )
+        from .regions import circle_tiles
+
+        blast = set(circle_tiles(self.world.size, x, y, NUKE_RADIUS))
+        before = {"zones": len(self.contamination_zones)}
+
+        # 1. Improvements annihilated across the whole blast.
+        destroyed = 0
+        for ty, tx in blast:
+            if self.world.improvements[ty, tx] != Improvement.NONE.value:
+                self.world.improvements[ty, tx] = Improvement.NONE.value
+                destroyed += 1
+
+        # 2. Population: settlements spawned in the fireball lose most of
+        # their people; deaths route through the real kill path so ruins,
+        # refugee migration, and recovery all behave as usual.
+        deaths: dict[str, int] = {}
+        for s in [
+            s for s in self.settlements
+            if s.is_alive and (s.spawn_y, s.spawn_x) in blast
+        ]:
+            pop_before = s.population
+            killed = max(0, round(s.population * NUKE_POPULATION_FRACTION))
+            s.population -= killed
+            deaths[s.name] = killed
+            if not s.is_alive:
+                self._kill(s)
+
+        # 3. Contamination over the blast area for decades.
+        zone = ContaminationZone(
+            center_x=x,
+            center_y=y,
+            radius=NUKE_RADIUS,
+            start_tick=self.tick,
+            end_tick=self.tick + CONTAMINATION_TICKS,
+        )
+        self.contamination_zones.append(zone)
+        self._invalidate_cache()
+
+        after = {
+            "zones": len(self.contamination_zones),
+            "contaminated_until": zone.end_tick,
+            "improvements_destroyed": destroyed,
+            "deaths": deaths,
+            "blast_radius": NUKE_RADIUS,
+        }
+        self._divine(
+            f"detonated a nuclear weapon at ({x}, {y}); "
+            f"{destroyed} improvements annihilated, "
+            f"contamination until tick {zone.end_tick}"
+        )
+        return before, after
+
+    # ------------------------------------------------------------------
     # Disasters (Sprint 5)
     # ------------------------------------------------------------------
 
@@ -1258,7 +1352,7 @@ class Simulation:
 
     def _apply_disaster(self, event: DisasterEvent) -> dict:
         """Immediate effects for one disaster (shared by random events and
-        authored god disasters — Sprint 39)."""
+        authored god disasters â€” Sprint 39)."""
         effect: dict = {}
         if event.type == DisasterType.FIRE:
             effect["tiles_burned"] = self._apply_fire(event)
@@ -1417,7 +1511,7 @@ class Simulation:
             created_at_tick=self.tick,
             ruin_origin=ruin.id,
         )
-        # Sprint 36: knowledge recovery — settlers inherit the ruined
+        # Sprint 36: knowledge recovery â€” settlers inherit the ruined
         # civilization's technologies and salvage its stockpiles.
         settlement.technologies = list(ruin.technologies)
         for resource, amount in ruin.salvage.items():
@@ -1626,7 +1720,7 @@ class Simulation:
             return False
         method = getattr(self, f"_act_{method_name}", None)
         if method is None:
-            # Named in WIRED_ACTIONS but no handler yet — treat as no-op.
+            # Named in WIRED_ACTIONS but no handler yet â€” treat as no-op.
             return False
         return bool(method(settlement))
 
@@ -1929,7 +2023,20 @@ class Simulation:
     def _compute_food_income(self, settlement: Settlement) -> float:
         idx = self.settlements.index(settlement)
         owned = self.world.ownership == idx
-        income = float(self.world.food_yield_grid()[owned].sum())
+        yields = self.world.food_yield_grid()
+        # Sprint 42: nuclear fallout suppresses yields in its zone.
+        contaminated = self._contaminated_tiles_mask()
+        if contaminated is not None:
+            from .disasters import CONTAMINATION_YIELD_FACTOR
+
+            factor = np.where(
+                contaminated,
+                CONTAMINATION_YIELD_FACTOR,
+                1.0,
+            )
+            income = float((yields * factor)[owned].sum())
+        else:
+            income = float(yields[owned].sum())
         # Sprint 40: god-blessed land adds per-tile food yield bonuses.
         if self.world.tile_food_bonus:
             bonus = sum(
@@ -2078,7 +2185,7 @@ class Simulation:
         for idx, settlement in enumerate(self.settlements):
             if not settlement.is_alive:
                 continue
-            # Sprint 38: frozen settlements skip their entire tick —
+            # Sprint 38: frozen settlements skip their entire tick â€”
             # no decisions, production, growth, or decay.
             if settlement.frozen:
                 continue
@@ -2109,6 +2216,16 @@ class Simulation:
             from .warfare import apply_army_upkeep
 
             apply_army_upkeep(settlement)
+            # Sprint 42: fallout bleeds happiness from contaminated spawns.
+            if settlement.frozen is False and self._settlement_contaminated(
+                settlement
+            ):
+                from .disasters import CONTAMINATION_HAPPINESS_DECAY
+
+                settlement.happiness = max(
+                    0.0,
+                    settlement.happiness - CONTAMINATION_HAPPINESS_DECAY,
+                )
             self._produce_resources(settlement)
             income = self.food_income(settlement) * self._drought_multiplier(
                 settlement
@@ -2268,7 +2385,7 @@ class Simulation:
             del self.experience_buffer[
                 : len(self.experience_buffer) - EXPERIENCE_BUFFER_MAX
             ]
-        # Sprint 11: strategy memory — EMA of reward per archetype/action.
+        # Sprint 11: strategy memory â€” EMA of reward per archetype/action.
         archetype = settlement.personality.get("archetype", "balanced")
         key = (archetype, int(prev_action))
         prior = self.strategy_memory.get(key)
@@ -2331,6 +2448,7 @@ def simulation_from_state(
     strategy_memory: dict | None = None,
     highway_projects: list | None = None,
     treaties: list | None = None,
+    contamination_zones: list | None = None,
 ) -> Simulation:
     """Rebuild a Simulation from deserialized snapshot state (Sprint 6).
 
@@ -2350,6 +2468,7 @@ def simulation_from_state(
         strategy_memory=strategy_memory or {},
         highway_projects=highway_projects or [],
         treaties=treaties or [],
+        contamination_zones=contamination_zones or [],
     )
     sim.agents = [
         RuleBasedAgent(world.seed, idx) for idx in range(len(settlements))

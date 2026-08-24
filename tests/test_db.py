@@ -79,6 +79,7 @@ def test_snapshot_state_is_compressed_json(tmp_path):
             "highway_projects",
             "treaties",
             "tile_food_bonus",
+            "contamination_zones",
         }
     finally:
         store.close()

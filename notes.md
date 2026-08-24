@@ -5,6 +5,45 @@ Decisions worth remembering are marked **[DECISION]**.
 
 ---
 
+## Session 44 — 2026-08-23 — Sprint 42: Nuclear Events
+
+**What was built**
+- `god_nuke(x, y)` (§16.2 "drop nuclear weapons"):
+  - annihilates ALL improvements in the blast radius (NUKE_RADIUS=12)
+  - settlements spawned in the fireball lose 60% of their population;
+    deaths route through the real `_kill` path so ruins, refugee
+    migration, and recovery all behave as usual
+  - leaves a `ContaminationZone` lasting CONTAMINATION_TICKS=7300
+    (~20 years): yields inside suppressed to 25% via a per-tick mask in
+    the memoized income path; affected settlements bleed happiness at
+    0.01/tick — deliberately above the ~0.0055 natural recovery rate,
+    so fallout despair always wins
+- Zones expire on schedule and yields restore fully (terrain-only base
+  persists; destroyed buildings stay gone)
+- Contamination surfaced in world summaries ("Contamination: N active
+  zone(s) — yields suppressed until tick T")
+- CLI: `god --action nuke --x --y` requires BOTH --force AND --confirm
+  (§16.4 double confirmation)
+- Persistence: contamination_zones = 15th snapshot field; four unpack
+  sites updated (index-from-end pattern per the S33 gotcha)
+- Live smoke: strike on Brazemi annihilated 9 improvements, killed 8,
+  income 94→20 under fallout, zone logged until t7400.
+- 11 new tests. Fast suite: 550 passing.
+
+### Decisions
+
+- **[DECISION] Deaths route through _kill**: no special-case nuclear
+  death — enriched ruins, refugee migration to allies/federations, and
+  knowledge recovery all apply. Nuclear war is catastrophic but lives
+  inside the same rules.
+- **[DECISION] Fallout despair > routine joy**: the happiness bleed
+  (0.01) deliberately exceeds natural recovery (~0.0055) so contaminated
+  settlements genuinely suffer rather than shrug it off.
+- **[DECISION] Two separate confirmation flags**: --force AND --confirm;
+  a single flag is too easy to alias out of habit.
+
+---
+
 ## Session 43 — 2026-08-23 — Sprint 41: Terrain Manipulation
 
 **What was built**
