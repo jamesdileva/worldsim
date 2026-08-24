@@ -34,10 +34,10 @@ S36 collapse/recovery depth, S37 long-horizon stability: 100k ticks ≈
 Phase 10), **Phase 7 ✅ COMPLETE** (S38 god controls polish, S39 disaster toolkit,
 S40 resource manipulation depth, S41 terrain manipulation, S42 nuclear
 events, S43 timeline branching/undo with byte-exact restore + branch
-timelines; sprint docs expanded through Phase 10), **Phase 8 in
-progress** (S44 visualization, S45 civilization histories, S46 event
-timeline, S47 learning dashboard, S48 replay system, S49 world
-comparison done).
+timelines; sprint docs expanded through Phase 10), **Phase 8 ✅ COMPLETE** (S44 visualization, S45 civilization histories,
+S46 event timeline, S47 learning dashboard, S48 replay system, S49 world
+comparison, S50 long-running autonomous world done; sprint docs expanded
+through Phase 10).
 
 **Test tiers:** `pytest` = fast suite (~250 tests, ~3–5 min);
 `pytest -m slow` = long integration runs.
@@ -100,6 +100,7 @@ comparison done).
 | `9775b5e` | 47 | Learning dashboard: offline training-health view, entropy/EV/KL flags, 2x2 panels + markdown report |
 | `6662500` | 48 | Replay system: timewalk module over the snapshot trail, exact-tick frames, animated GIF export |
 | `3b894fc` | 49 | World comparison: structural diff (settlements/counters/events), markdown report, comparison chart |
+| `aa21dbb` | 50 | Long-running autonomous world: simulate --report-dir living-world bundle; visual verification via replay GIF (**roadmap complete**) |
 
 ---
 
@@ -803,6 +804,24 @@ Agents replace auto-rules; the frozen RL contract is born
 - **[WHY] Event keys include descriptions**: two worlds can log the
   same type at the same tick for different settlements — tick+type
   alone would mask real divergence.
+
+### Session 52 — Sprint 50 (this session)
+- `simulate --report-dir DIR`: after any run (or collapse), export the
+  living-world bundle — world_map.png, population_curves.png (epoch
+  history), event_histogram.png, chronicle.md (civilization summaries +
+  per-settlement sagas); curves skipped gracefully pre-first-epoch.
+- Visual verification loop assembled from Phase 8 sprints: 20k-tick
+  autonomous run on seed 42 → autosaved snapshots every 1000 ticks →
+  replay GIF reconstructs the whole run; final state year 54, three
+  Era-3 civilizations with all 4 techs and ~450-500 armies each,
+  populations 10→156. Bundle + GIF in screenshots/s50_longrun/.
+- Determinism pinned: same seed → byte-identical chronicle.md.
+- 6 new tests. Fast suite: 627 passing.
+- **[DECISION] The bundle is the product**: one command launches a
+  world AND hands back its map, curves, histogram, and sagas — the
+  roadmap's "living ant farm" vision, end to end.
+- **[NOTE] Curves come from in-RAM epoch history**; reloading a saved
+  world starts epochs fresh (documented S45 limitation).
 
 ---
 
