@@ -849,7 +849,7 @@ Agents replace auto-rules; the frozen RL contract is born
   pinpointed it - v1.1 index.html dropped the settlements status panel;
   refreshStatus crashed, aborting refreshAll before refreshGrid ->
   canvas never painted. Panel restored + regression test pinning every
-  app.js \ against index.html. Fast suite: 663 passing.
+  app.js element id against index.html. Fast suite: 663 passing.
 - **[WHY] Static id-consistency test**: no build step or type checker
   for the vanilla-JS frontend - a cross-check test is the only guard
   against DOM-reference drift shipping silently.
