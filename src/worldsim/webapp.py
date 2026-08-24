@@ -312,14 +312,22 @@ def create_app(session: WorldSession) -> FastAPI:
                 key=lambda x: x.name)
         ]
         tick = sim.tick
+        road_value = Improvement.ROAD.value
+        # Real buildings are codes 1..4; the grid also marks ruins with
+        # -1, which must not render as buildings.
+        mask = (world.improvements >= Improvement.FARM.value)
         return {
             "size": world.size,
             "tick": tick,
             "terrain": world.terrain.tolist(),
             "roads": [
                 [int(x), int(y)]
-                for y, x in np.argwhere(
-                    world.improvements == Improvement.ROAD.value)
+                for y, x in np.argwhere(world.improvements == road_value)
+            ],
+            "buildings": [
+                [int(x), int(y), int(v)]
+                for (y, x), v in zip(np.argwhere(mask),
+                                     world.improvements[mask])
             ],
             "ruins": [
                 {"x": r.spawn_x, "y": r.spawn_y}
@@ -555,15 +563,18 @@ def _dispatch_god(session: WorldSession, action: str,
                 int(param("y")), **kwargs)
         elif action == "freeze":
             before, after = sim.god_toggle_freeze(target)
-        elif action == "terraform":
+        elif action in ("terraform", "terraform_region"):
+            # The frontend speaks "terraform_region"; "terraform" is the
+            # CLI-era name that upgrades to region mode given a radius.
             radius = param("radius", None)
-            if radius is None:
-                before, after = sim.god_terraform(
+            if action == "terraform_region" or radius is not None:
+                before, after = sim.god_terraform_region(
                     int(param("x")), int(param("y")),
+                    int(radius if radius is not None else 4),
                     param("terrain", "", str))
             else:
-                before, after = sim.god_terraform_region(
-                    int(param("x")), int(param("y")), int(radius),
+                before, after = sim.god_terraform(
+                    int(param("x")), int(param("y")),
                     param("terrain", "", str))
         elif action == "bless_land":
             before, after = sim.god_bless_land(

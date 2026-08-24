@@ -144,3 +144,24 @@ def test_app_js_ids_exist_in_index_html():
     missing = ids_used - ids_in_html
     assert not missing, (
         f'app.js references missing elements: {sorted(missing)}')
+
+
+def test_terraform_region_alias_accepted(client):
+    # S58: the frontend speaks "terraform_region"; the dispatch must
+    # accept it (it 404'd before, so the UI action silently never ran).
+    response = client.post('/api/god/terraform_region', json={
+        'action': 'terraform_region', 'confirm': False,
+        'params': {'x': 32, 'y': 32, 'terrain': 'mountain', 'radius': 3}})
+    assert response.status_code == 200
+    after = response.json()['after']
+    assert after.get('tiles_changed', 0) > 0 or 'tiles' in str(after)
+
+
+def test_grid_includes_buildings(client):
+    grid = client.get('/api/grid').json()
+    assert isinstance(grid['buildings'], list)
+    for entry in grid['buildings']:
+        assert len(entry) == 3
+        x, y, kind = entry
+        assert 0 <= x < grid['size'] and 0 <= y < grid['size']
+        assert kind in (1, 2, 3, 4)

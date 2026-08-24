@@ -5,6 +5,42 @@ Decisions worth remembering are marked **[DECISION]**.
 
 ---
 
+## Session 59 - 2026-08-24 - Desktop UX round: map fidelity + god-action fixes
+
+**User reports after playing the packaged exe**: no roads/buildings/
+ruins visible; highway-completed event but no connecting road; terraform
+and spawn settlement do nothing; nuked 2 of 3 cities yet all three show
+identical population.
+
+**Root causes found**
+- terraform_region 404d: frontend speaks terraform_region, dispatch only
+  knew the CLI-era terraform. Alias added.
+- Click-to-target SELECTED settlements instead of setting x/y for
+  coordinate actions (nuke/spawn/disaster/terraform), so aims kept stale
+  coords (often water -> refused). Coordinate actions now always take
+  the clicked tile; selection info still shown.
+- Buildings were never in /api/grid. Added [x, y, kind] codes 1..4;
+  grid also carries ruin markers (-1) which must be excluded.
+- Map was FROZEN during run: WS only refreshed status. Grid now
+  refreshes every 3s; roads drawn as opaque dark tiles, buildings as
+  f/w/m/g glyphs; legend updated.
+- Identical pops after nukes is EXPECTED dynamics: populations converge
+  to the shared food-carrying-cap equilibrium (S50 finding); regrowth
+  re-equalizes cities within a few hundred ticks. Smoke proved a
+  properly aimed nuke kills (28 deaths, 67 improvements destroyed).
+
+Fast suite: 665 passing. Exe rebuilt + full HTTP smoke vs live exe.
+
+### Decisions
+
+- **[WHY] Nuke physics unchanged**: the sim was right; the UI aim was
+  wrong. Fix instruments, not rules.
+- **[GOTCHA] improvements grid uses -1 for ruins**: any mask filtering
+  improvement values must exclude negatives or ruins render as builds.
+
+---
+
+
 ## Session 58 - 2026-08-24 - Sprint 54 follow-up: black-map hardening (resumed from exported session)
 
 **User report**: after creating a world in the packaged exe, the map

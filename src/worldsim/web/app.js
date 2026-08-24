@@ -14,6 +14,13 @@ const PALETTE = {
 const TARGET_ACTIONS = new Set(["smite", "bless", "freeze"]);
 const COORD_ACTIONS = new Set([
   "nuke", "spawn_settlement", "trigger_disaster", "terraform_region"]);
+// Improvement codes from /api/grid (matches the Improvement enum).
+const BUILDING_STYLE = {
+  1: { glyph: "f", color: "#e8d44d" }, // farm
+  2: { glyph: "w", color: "#b07a3f" }, // sawmill
+  3: { glyph: "m", color: "#c9c9c9" }, // mine
+  4: { glyph: "g", color: "#e09b3d" }, // granary
+};
 
 let gridCache = null;
 let selectedName = null;
@@ -70,9 +77,19 @@ function drawMap(data) {
         ctx.fillRect(x * cell, y * cell, cell + 0.5, cell + 0.5);
       }
     }
-    ctx.fillStyle = "rgba(0,0,0,0.55)";
+    ctx.fillStyle = "#2e2e33";
     for (const [x, y] of data.roads || []) {
-      ctx.fillRect(x * cell - 0.5, y * cell - 0.5, cell + 1, cell + 1);
+      ctx.fillRect(x * cell + cell * 0.15, y * cell + cell * 0.15,
+                   cell * 0.7, cell * 0.7);
+    }
+    ctx.font = `${Math.max(7, cell * 1.6)}px monospace`;
+    ctx.textAlign = "center";
+    for (const [x, y, kind] of data.buildings || []) {
+      const style = BUILDING_STYLE[kind];
+      if (!style) continue;
+      ctx.fillStyle = style.color;
+      ctx.fillText(style.glyph,
+                   (x + 0.5) * cell, (y + 0.85) * cell);
     }
     ctx.fillStyle = "#9aa0a6";
     ctx.font = `${Math.max(7, cell * 2.2)}px monospace`;
@@ -113,21 +130,25 @@ $("map").onclick = (event) => {
   const tx = Math.floor((event.clientX - rect.left) * scale / cell);
   const ty = Math.floor((event.clientY - rect.top) * scale / cell);
 
+  const action = $("god-action").value;
   let best = null, bestDist = Infinity;
   for (const s of gridCache.settlements) {
     const d = Math.max(Math.abs(s.x - tx), Math.abs(s.y - ty));
     if (d <= 2 && d < bestDist) { best = s; bestDist = d; }
   }
-  if (best) {
+  // Coordinate actions always take the clicked tile as aim — even on
+  // top of a settlement (nuke THIS city must not keep stale coords).
+  if (COORD_ACTIONS.has(action)) {
+    $("p-x").value = tx;
+    $("p-y").value = ty;
+    $("selected-name").textContent =
+      `${action} aimed at (${tx}, ${ty})` +
+      (best ? ` — ${best.name} is here` : "");
+  } else if (best) {
     selectedName = best.name;
     $("p-settlement").value = best.name;
     $("selected-name").textContent =
       `${best.name} — pop ${best.population} @ (${best.x},${best.y})`;
-  } else if ($("god-action").value === "nuke"
-             || COORD_ACTIONS.has($("god-action").value)) {
-    $("p-x").value = tx;
-    $("p-y").value = ty;
-    $("selected-name").textContent = `aimed at (${tx}, ${ty})`;
   } else {
     selectedName = null;
     $("selected-name").textContent =
@@ -291,5 +312,10 @@ connectSocket();
 setInterval(refreshStatus, 3000);
 setInterval(refreshFeed, 3000);
 setInterval(refreshWhatsHappening, 3000);
+// Keep the map live while the world runs (the WS ticker only updates
+// status — without this the canvas freezes at its last explicit step).
+setInterval(() => {
+  refreshGrid().catch((e) => showPageError("map refresh", e));
+}, 3000);
 setInterval(refreshCharts, 15000);
 refreshAll();
