@@ -1504,6 +1504,14 @@ def cmd_serve(args: argparse.Namespace) -> int:
         raise
     print(f"Serving worldsim API on http://{args.host}:{args.port} "
           f"(docs at /docs)")
+    import threading
+    import webbrowser
+
+    def _open_browser() -> None:
+        url_host = "127.0.0.1" if args.host in ("0.0.0.0", "") else args.host
+        webbrowser.open(f"http://{url_host}:{args.port}")
+
+    threading.Timer(1.5, _open_browser).start()
     try:
         uvicorn.run(app, host=args.host, port=args.port, log_level="info")
     finally:

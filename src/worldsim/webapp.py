@@ -19,13 +19,30 @@ from __future__ import annotations
 import threading
 import time
 from dataclasses import dataclass, field
+from pathlib import Path
 
+import numpy as np
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.responses import Response
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
+from .buildings import Improvement
 from .db import WorldStore, serialize_world
 from .simulation import Simulation
+
+
+def _web_dir() -> Path:
+    return Path(__file__).parent / "web"
+
+
+def _chart_bytes(render) -> bytes:
+    """Render a chart straight into memory (no temp files)."""
+    import io
+
+    buffer = io.BytesIO()
+    render(buffer)
+    return buffer.getvalue()
 
 
 @dataclass
@@ -269,6 +286,77 @@ def create_app(session: WorldSession) -> FastAPI:
 
         return Response(content=session.map_png_bytes(),
                         media_type="image/png")
+
+    @app.get("/api/grid")
+    def api_grid():
+        """Compact tile/settlement arrays for the canvas frontend."""
+        _require_world(session)
+        sim = session.sim
+        world = sim.world
+        settlements = [
+            {
+                "name": s.name,
+                "x": s.spawn_x,
+                "y": s.spawn_y,
+                "population": s.population,
+            }
+            for s in sorted(
+                (x for x in sim.settlements if x.is_alive),
+                key=lambda x: x.name)
+        ]
+        tick = sim.tick
+        return {
+            "size": world.size,
+            "tick": tick,
+            "terrain": world.terrain.tolist(),
+            "roads": [
+                [int(x), int(y)]
+                for y, x in np.argwhere(
+                    world.improvements == Improvement.ROAD.value)
+            ],
+            "ruins": [
+                {"x": r.spawn_x, "y": r.spawn_y}
+                for r in getattr(sim, "ruins", [])
+            ],
+            "zones": [
+                {"cx": z.center_x, "cy": z.center_y, "radius": z.radius}
+                for z in getattr(sim, "contamination_zones", [])
+                if z.is_active(tick)
+            ],
+            "settlements": settlements,
+        }
+
+    @app.get("/api/charts/populations.png")
+    def api_populations_png():
+        _require_world(session)
+        from .visualization import export_population_chart
+
+        try:
+            content = _chart_bytes(
+                lambda buf: export_population_chart(session.sim, buf))
+        except ValueError as exc:
+            raise HTTPException(404, str(exc))
+        return Response(content=content, media_type="image/png")
+
+    @app.get("/api/charts/events.png")
+    def api_events_png():
+        _require_world(session)
+        if not session.sim.event_log:
+            raise HTTPException(404, "no events recorded yet")
+        from .visualization import export_event_histogram
+
+        return Response(content=_chart_bytes(
+            lambda buf: export_event_histogram(session.sim, buf)),
+            media_type="image/png")
+
+    from fastapi.responses import FileResponse
+
+    @app.get("/", include_in_schema=False)
+    def index():
+        return FileResponse(_web_dir() / "index.html")
+
+    app.mount("/static", StaticFiles(directory=str(_web_dir())),
+              name="static")
 
     @app.get("/api/chronicle")
     def api_chronicle(name: str | None = None):

@@ -1298,6 +1298,10 @@ same handlers); audited + undoable exactly like CLI/live.
 
 **Acceptance criteria:** launch → watch live → intervene → undo entirely
 in the browser; no external services; deterministic artifacts unchanged.
+*v1.1 polish (live feedback): click-to-target settlements (smite/bless/
+freeze without coordinates), coordinate actions aimed by clicking tiles,
+on-page map key + "what's happening" ticker explaining agent activity
+(road building etc.), grid form layout.*
 
 ### Sprint 54 — Desktop Packaging (.exe)
 **Duration:** 1 week

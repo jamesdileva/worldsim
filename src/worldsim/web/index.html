@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>WorldSim</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<header>
+  <h1>WorldSim <span id="clock"></span></h1>
+  <div class="controls">
+    <button id="btn-step">step +1</button>
+    <button id="btn-step10">+10</button>
+    <button id="btn-run">run</button>
+    <button id="btn-pause">pause</button>
+    <button id="btn-undo" class="danger">undo</button>
+  </div>
+</header>
+
+<main>
+  <section id="map-panel">
+    <canvas id="map" width="640" height="640"></canvas>
+    <div class="legend">
+      <b>map key:</b>
+      <span class="swatch" style="background:#e05555"></span> settlement
+      <span class="swatch" style="background:#111"></span> road
+      <span class="swatch" style="background:saddlebrown"></span> building
+      <span class="swatch" style="background:#9aa0a6">X</span> ruin
+      <span class="swatch" style="background:rgba(255,140,0,.35)"></span> fallout
+      <span class="swatch sw-terrain">~ "</span> water/desert/plains/fertile/forest/mtn
+    </div>
+    <div id="hint">Tip: click a red settlement to target it, then smite/bless/
+      freeze below. Pick nuke or terraform to aim at any clicked tile instead.</div>
+    <div class="charts">
+      <img id="pop-chart" src="/api/charts/populations.png" alt="population curves"
+           title="population curves (refreshes each epoch)">
+      <img id="event-chart" src="/api/charts/events.png" alt="events"
+           title="event histogram (refreshes periodically)">
+    </div>
+  </section>
+
+  <aside>
+    <div id="selected-box">
+      <h2>Selected target</h2>
+      <div id="selected-name">— none (click a settlement) —</div>
+    </div>
+
+    <h2>Play god</h2>
+    <form id="god-form">
+      <label>action
+        <select id="god-action">
+          <option value="smite">smite (needs target)</option>
+          <option value="bless">bless (needs target)</option>
+          <option value="freeze">freeze (needs target)</option>
+          <option value="nuke">nuke (clicks set x/y)</option>
+          <option value="spawn_settlement">spawn settlement (x/y)</option>
+          <option value="trigger_disaster">disaster (x/y)</option>
+          <option value="terraform_region">terraform (x/y)</option>
+        </select>
+      </label>
+      <div class="row"><span>target</span><input id="p-settlement"
+        placeholder="click a settlement"></div>
+      <div class="row"><span>x / y</span><span>
+        <input id="p-x" type="number" value="32" class="half">
+        <input id="p-y" type="number" value="32" class="half"></span></div>
+      <div class="row"><span>amount</span><input id="p-amount"
+        type="number" value="10"></div>
+      <div class="row"><span>resource</span>
+        <select id="p-resource">
+          <option>food</option><option>wood</option>
+          <option>stone</option><option>metal</option>
+          <option>happiness</option>
+        </select></div>
+      <div class="row"><span>terrain</span>
+        <select id="p-terrain">
+          <option>water</option><option>desert</option>
+          <option>plains</option><option>fertile</option>
+          <option>forest</option><option selected>mountain</option>
+        </select></div>
+      <label class="confirm"><input id="p-confirm" type="checkbox">
+        confirm catastrophe</label>
+      <button type="submit">invoke</button>
+    </form>
+    <div id="god-result"></div>
+
+    <h2>What's happening</h2>
+    <div id="whats-happening">observing…</div>
+
+    <h2>Timeline</h2>
+    <ul id="feed"></ul>
+  </aside>
+</main>
+
+<script src="/static/app.js"></script>
+</body>
+</html>

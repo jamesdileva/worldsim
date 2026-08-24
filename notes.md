@@ -5,6 +5,36 @@ Decisions worth remembering are marked **[DECISION]**.
 
 ---
 
+## Session 56 — 2026-08-23 — Sprint 53 (v1.1 polish): click-to-target + readability
+
+**User feedback drove this iteration** after a live session on the
+dashboard: god actions demanded X/Y coordinates, the form layout was
+messy, and unexplained tile changes (agent road-building) needed context.
+
+**What changed (all client-side — zero server/API churn):**
+- **Click-to-target**: clicking near a red settlement selects it
+  (gold highlight, target box fills in) so smite/bless/freeze need no
+  coordinates; coordinate actions (nuke/spawn/disaster/terraform) are
+  aimed by clicking any tile.
+- Form rebuilt as a clean grid; map key added under the canvas
+  (roads/buildings/ruins/fallout/terrain swatches).
+- "What's happening" ticker summarizing the latest events + total road
+  tiles laid — explains the changing tiles without flooding logs.
+- Timeline feed polls every 3s at depth 25.
+- JS syntax verified with `node --check` (regex parens defeat naive
+  balance counters).
+- Fast suite: 661 passing (no server/API changes to test).
+
+### Decisions
+
+- **[WHY] Click-to-target client-side only**: settlement selection is a
+  UI concern; nearest-settlement lookup over /api/grid data needs no new
+  endpoint, and the API stays lean for S54 packaging.
+- **[WHY] Ticker instead of more log lines**: flooding the feed hides
+  signal; a rolling summary + full timeline below covers both needs.
+
+---
+
 ## Session 55 — 2026-08-23 — Sprint 52: Local Web API (`worldsim serve`)
 
 **What was built**
