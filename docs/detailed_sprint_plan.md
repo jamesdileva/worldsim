@@ -994,6 +994,30 @@ companion to Sprint 43 branch timelines.
   diverged histories produce precise field/event diffs; deterministic
   outputs; frozen contract untouched
 
+### Sprint 50 — Long-Running Autonomous World (detailed)
+
+**Duration:** 1 week
+**Deliverable:** Launch a world and let it live: continuous autonomous
+simulation with periodic status, autosaves, and a living-world report
+bundle at the end (roadmap finish line).
+
+**Tasks:**
+- `simulate --report-dir DIR`: after any run, export the full living-
+  world bundle — world map PNG, population curves (epoch history),
+  event histogram, chronicle.md (civilization summaries + per-
+  settlement sagas); curves skipped gracefully pre-first-epoch
+- Visual verification loop built from prior Phase 8 sprints:
+  autosaved snapshots feed `worldsim replay --gif` for a watch-it-live
+  animation of the whole run
+- Long-run acceptance reuses S37 soak guarantees (bounded logs/memory,
+  determinism)
+
+**Acceptance criteria:**
+- A 20k+ tick autonomous run completes with bounded memory and
+  produces all bundle artifacts; same seed → byte-identical chronicles;
+  replay GIF reconstructs the run from snapshots; frozen contract
+  untouched
+
 ### Sprint 37 — Long-Term Historical Simulation (detailed)
 
 **Duration:** 1 week

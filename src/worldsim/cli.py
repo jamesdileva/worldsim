@@ -52,6 +52,12 @@ def build_parser() -> argparse.ArgumentParser:
         "--report-interval", type=int, default=100, help="Ticks between status lines"
     )
     sim.add_argument(
+        "--report-dir",
+        default=None,
+        help="Export a living-world bundle after the run: map PNG, "
+             "population curves, event histogram, chronicles (Sprint 50)",
+    )
+    sim.add_argument(
         "--save-interval",
         type=int,
         default=500,
@@ -701,7 +707,53 @@ def cmd_simulate(args: argparse.Namespace) -> int:
         )
         for action, count in named[:10]:
             print(f"  {action.name:<24} {count:>6}  ({action_category(action)})")
+
+    if args.report_dir:
+        paths = _write_report_bundle(sim, args.report_dir)
+        print(f"\nLiving-world report bundle written to {args.report_dir}:")
+        for path in paths:
+            print(f"  {path}")
     return 0
+
+
+def _write_report_bundle(sim, report_dir: str) -> list[str]:
+    """Sprint 50: export the living-world artifact bundle after a run."""
+    from pathlib import Path
+
+    from .histories import (
+        civilizations_summary,
+        render_chronicle,
+    )
+    from .visualization import (
+        export_event_histogram,
+        export_map_png,
+        export_population_chart,
+    )
+
+    out = Path(report_dir)
+    out.mkdir(parents=True, exist_ok=True)
+    written: list[str] = []
+
+    written.append(str(export_map_png(sim, out / "world_map.png")))
+    try:
+        written.append(str(export_population_chart(
+            sim, out / "population_curves.png")))
+    except ValueError:
+        pass  # no epochs recorded
+    if sim.event_log:
+        written.append(str(export_event_histogram(
+            sim, out / "event_histogram.png")))
+
+    lines = ["# World chronicle", ""]
+    lines += [f"- {line}" for line in civilizations_summary(sim)]
+    lines.append("")
+    for s in sorted((x for x in sim.settlements), key=lambda x: x.name):
+        lines.append(render_chronicle(sim, s, max_lines=60))
+        lines.append("")
+    chronicle_path = out / "chronicle.md"
+    chronicle_path.write_text("\n".join(lines), encoding="utf-8")
+    written.append(str(chronicle_path))
+    return written
 
 
 def cmd_save(args: argparse.Namespace) -> int:
