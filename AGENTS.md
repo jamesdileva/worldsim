@@ -31,10 +31,10 @@ territory/buildings/reward; sprint docs expanded through Phase 10),
 S33 highways/infrastructure, S34 treaties & federations, S35 warfare,
 S36 collapse/recovery depth, S37 long-horizon stability: 100k ticks ≈
 11 min at 151 tps with bounded memory; sprint docs expanded through
-Phase 10), **Phase 7 in progress** (S38 god controls polish, S39 disaster toolkit,
-S40 resource manipulation depth, S41 terrain manipulation done; S42
-nuclear events done; Phase 7 sprint docs S38–43 expanded with full
-detail).
+Phase 10), **Phase 7 ✅ COMPLETE** (S38 god controls polish, S39 disaster toolkit,
+S40 resource manipulation depth, S41 terrain manipulation, S42 nuclear
+events, S43 timeline branching/undo with byte-exact restore + branch
+timelines; sprint docs expanded through Phase 10).
 
 **Test tiers:** `pytest` = fast suite (~250 tests, ~3–5 min);
 `pytest -m slow` = long integration runs.
@@ -90,6 +90,7 @@ detail).
 | `df9fcc4` | 40 | Resource manipulation depth: region targeting, mass bless/strip/smite, persistent land blessings |
 | `a375795` | 41 | Terrain manipulation: god_terraform single/region, cache invalidation, improvement-compatibility policy |
 | `e50d5e0` | 42 | Nuclear events: blast annihilation, contamination zones (20-year yield/happiness debuffs), double-confirmation CLI |
+| `30406f3` | 43 | Timeline branching/undo: undo_points snapshots, worldsim undo + --as-world branches, byte-exact restore (**Phase 7 complete**) |
 
 ---
 
@@ -664,6 +665,29 @@ Agents replace auto-rules; the frozen RL contract is born
   suffer.
 - **[DECISION] Two separate confirmation flags**: --force and --confirm;
   one flag is too easy to alias out of habit.
+
+### Session 45 — Sprint 43 (this session)
+- `undo_points` table: every APPLIED god intervention writes a full-state
+  pre-intervention snapshot (captured before mutation, persisted only
+  when the action lands).
+- CLI `worldsim undo --world-id`: reverts in place; `--as-world NEW`
+  restores into a new world id so alternate timelines coexist
+  (`skip_entity_rows=True` — branch worlds live in their snapshot
+  state_json since settlements.id is globally unique in aux tables).
+- `Simulation.from_state_json`: replay/branching primitive.
+- **Latent serialization bug fixed (since Sprint 5!)**: happiness,
+  negative_food_streak, low_happiness_progress were never serialized —
+  save/resume silently reset settlement mood to 0.5. Found by the
+  byte-exact undo test. Encode/decode now round-trips all three.
+- Live smoke via real CLI: generate → simulate → smite (12→0) → undo
+  (restored to tick 50, pop 12) → branch timeline created.
+- 7 new tests. Fast suite: 557 passing.
+- **[DECISION] Undo points written post-application**: captured pre-
+  mutation, persisted only when actions land — no junk points from
+  validation failures.
+- **[WHY] Byte-exact restore as acceptance**: exact-equality summaries
+  have now caught two latent bugs (happiness reset here, transposed
+  territory checks in S31).
 
 ---
 
