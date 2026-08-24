@@ -31,9 +31,9 @@ territory/buildings/reward; sprint docs expanded through Phase 10),
 S33 highways/infrastructure, S34 treaties & federations, S35 warfare,
 S36 collapse/recovery depth, S37 long-horizon stability: 100k ticks ≈
 11 min at 151 tps with bounded memory; sprint docs expanded through
-Phase 10), **Phase 7 in progress** (S38 god controls polish done; S39 disaster
-toolkit done; S40 resource manipulation depth done; S41 terrain
-manipulation done; Phase 7 sprint docs S38–43 expanded with full
+Phase 10), **Phase 7 in progress** (S38 god controls polish, S39 disaster toolkit,
+S40 resource manipulation depth, S41 terrain manipulation done; S42
+nuclear events done; Phase 7 sprint docs S38–43 expanded with full
 detail).
 
 **Test tiers:** `pytest` = fast suite (~250 tests, ~3–5 min);
@@ -89,6 +89,7 @@ detail).
 | `d15dc27` | 39 | Disaster toolkit: authored disasters via shared application path, zone preview, CLI wiring |
 | `df9fcc4` | 40 | Resource manipulation depth: region targeting, mass bless/strip/smite, persistent land blessings |
 | `a375795` | 41 | Terrain manipulation: god_terraform single/region, cache invalidation, improvement-compatibility policy |
+| `e50d5e0` | 42 | Nuclear events: blast annihilation, contamination zones (20-year yield/happiness debuffs), double-confirmation CLI |
 
 ---
 
@@ -643,6 +644,26 @@ Agents replace auto-rules; the frozen RL contract is born
   farm on mountain rock is dead land; the audit shows the cost.
 - **[DECISION] Roads die only under water**: graded earth works on any
   land surface.
+
+### Session 44 — Sprint 42 (this session)
+- `god_nuke(x, y)`: annihilates all improvements in NUKE_RADIUS=12;
+  settlements spawned in the fireball lose 60% population through the
+  real _kill path (ruins/refugees/recovery apply); leaves a
+  ContaminationZone for ~20 years (yields suppressed to 25% via per-tick
+  mask in the memoized income path; happiness bleeds 0.01/tick).
+- Zones expire on schedule; terrain-only yields restore fully, destroyed
+  buildings stay gone. Contamination surfaced in world summaries.
+- CLI: nuke requires BOTH --force AND --confirm (§16.4 double
+  confirmation). Persistence: contamination_zones = 15th snapshot field.
+- Live: strike on Brazemi → 9 improvements annihilated, 8 dead,
+  income 94→20 under fallout, zone until t7400. Fast suite: 550 passing.
+- **[DECISION] Deaths route through _kill**: nuclear war is catastrophic
+  but lives inside the same rules — no special-casing.
+- **[DECISION] Fallout despair > routine joy**: bleed (0.01) exceeds
+  natural recovery (~0.0055) so contaminated settlements genuinely
+  suffer.
+- **[DECISION] Two separate confirmation flags**: --force and --confirm;
+  one flag is too easy to alias out of habit.
 
 ---
 
