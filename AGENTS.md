@@ -39,7 +39,8 @@ S46 event timeline, S47 learning dashboard, S48 replay system, S49 world
 comparison, S50 long-running autonomous world done). **S51 live shell
 DONE** (interactive World Simulator shell — one session owns one world;
 S52 serve DONE (FastAPI REST+WS over a live world).
-S53 web frontend + S54 .exe packaging remain.
+S53 web frontend DONE (canvas map, click-to-target god panel,
+timeline feed, charts). S54 .exe packaging remains.
 **Phase 9 PLANNED** (The World Simulator App, Sprints 51–54:
 live shell -> serve web API -> browser frontend -> pywebview +
 PyInstaller .exe; former Advanced-Intelligence phase renumbered to
@@ -109,6 +110,7 @@ Phase 10).
 | `aa21dbb` | 50 | Long-running autonomous world: simulate --report-dir living-world bundle; visual verification via replay GIF (**roadmap complete**) |
 | `60e7300` | 51 | Interactive shell: worldsim live REPL owning one world in memory — step/watch/inspect + full god surface with confirmations, session undo, branch (**Phase 9 begins**) |
 | `dcd8fd7` | 52 | Local web API: FastAPI serve over a live world, REST+WS endpoints, HTTP 428 confirmation gates, thread-safe store |
+| `492bafc` | 53 | Web frontend v1 (+v1.1 polish): canvas map with overlays, click-to-target god panel, timeline feed, charts |
 
 ---
 
@@ -830,6 +832,21 @@ Agents replace auto-rules; the frozen RL contract is born
   roadmap's "living ant farm" vision, end to end.
 - **[NOTE] Curves come from in-RAM epoch history**; reloading a saved
   world starts epochs fresh (documented S45 limitation).
+
+### Session 56 - Sprint 53 (this session)
+- web/ static frontend (vanilla JS + canvas, zero build
+  toolchain): map with overlays, step/run/pause controls, god panel
+  with confirm checkbox, undo, WS status ticker, timeline feed,
+  auto-refreshing population/event charts.
+- Server additions: GET /api/grid (compact tile/settlement arrays),
+  in-memory chart PNG endpoints, static mount at /static + index at /.
+- serve auto-opens the browser 1.5s after startup.
+- v1.1 from live user feedback: click-to-target settlements (no more
+  hand-typing X/Y), coordinate actions aimed by clicking tiles, on-page
+  map key, and a whats-happening ticker explaining agent road-building.
+- JS verified via node --check. 8 new tests. Fast suite: 661 passing.
+- **[WHY] Click-to-target client-side only**: nearest-settlement
+  lookup over /api/grid needs no new endpoint — API stays lean for S54.
 
 ### Session 55 - Sprint 52 (this session)
 - webapp.py: WorldSession (mirrors live shell) wrapped by a
