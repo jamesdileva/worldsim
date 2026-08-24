@@ -36,7 +36,7 @@ S40 resource manipulation depth, S41 terrain manipulation, S42 nuclear
 events, S43 timeline branching/undo with byte-exact restore + branch
 timelines; sprint docs expanded through Phase 10), **Phase 8 in
 progress** (S44 visualization, S45 civilization histories, S46 event
-timeline, S47 learning dashboard done).
+timeline, S47 learning dashboard, S48 replay system done).
 
 **Test tiers:** `pytest` = fast suite (~250 tests, ~3–5 min);
 `pytest -m slow` = long integration runs.
@@ -97,6 +97,7 @@ timeline, S47 learning dashboard done).
 | `a67b88b` | 45 | Civilization histories: event-log chronicles, civilizations summary, population curves + chart export |
 | `163daef` | 46 | Event timeline: categorized chronological view, filters, stacked category histogram chart |
 | `9775b5e` | 47 | Learning dashboard: offline training-health view, entropy/EV/KL flags, 2x2 panels + markdown report |
+| `6662500` | 48 | Replay system: timewalk module over the snapshot trail, exact-tick frames, animated GIF export |
 
 ---
 
@@ -767,6 +768,24 @@ Agents replace auto-rules; the frozen RL contract is born
 - **[DECISION] Offline by construction**: the dashboard never loads
   models or runs rollouts — instant answers from stored artifacts;
   expensive evaluation stays in rl dashboard/evaluate.
+
+### Session 50 — Sprint 48 (this session)
+- `timewalk.py` (named around the existing RL `replay.py`): the
+  persisted snapshots trail is a complete replayable timeline —
+  ordered frame listing, exact-tick loading via
+  `Simulation.from_state_json`, lazy stride iteration, animated GIF
+  export bounded by stride + max_frames.
+- CLI: `worldsim replay --world-id [--at tick] [--list] [--gif --fps
+  --stride]`.
+- **Incident: clobbered `src/worldsim/replay.py`** (Sprint 13 RL
+  ReplayBuffer) — recovered from git; recovery hit the UTF-16 redirect
+  trap again. Both modules verified intact.
+- Live smoke: --list/--at/GIF verified through the CLI. Fast suite:
+  614 passing.
+- **[DECISION] Frames are independent simulations**: mutating a
+  replayed world never touches stored snapshots or other frames.
+- **Naming lesson upgraded to SOURCE modules**: check git status before
+  creating any new file.
 
 ---
 
