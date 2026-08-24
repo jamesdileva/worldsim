@@ -24,14 +24,32 @@ rendering, invisible because console.error goes nowhere inside pywebview.
 - Rebuilt exe; smoke verified served app.js contains hardening + full
   create/grid/step/smite/undo loop. Web tests 19 passing; node --check ok.
 
+**ROOT CAUSE FOUND (user retest)**: the on-page error trap immediately
+paid off - user reported "Cannot set properties of null (setting
+'innerHTML')". The Sprint 53 v1.1 index.html rewrite DROPPED the
+settlements status panel, but refreshStatus still wrote into it:
+$("settlements").innerHTML threw, the exception aborted refreshAll
+BEFORE refreshGrid ran, and the canvas was never painted -> the black
+map. Swallowed by console.error (invisible in webview) until Session 58's
+hardening surfaced it on-page.
+
+**Fix**
+- Restored `<h2>Status</h2><ul id="settlements"></ul>` to index.html.
+- New regression test test_app_js_ids_exist_in_index_html: every element
+  app.js addresses via $("id") must exist in index.html - this bug class
+  can never silently ship again.
+- Rebuilt exe; smoke verified all 27 app.js element ids present in the
+  served HTML + create/grid/step loop. Fast suite: 663 passing.
+
 ### Decisions
 
 - **[WHY] On-page error surfacing over console logging**: packaged
   pywebview windows have no devtools in normal use - an invisible
-  console made this bug undiagnosable from user reports alone.
-- **[NOTE] Root cause not yet confirmed**: if retest still shows black,
-  the on-screen error text will now name it exactly. Data path already
-  proven good end to end.
+  console made this bug undiagnosable; one on-screen message then named
+  the exact failing line.
+- **[WHY] Static id-consistency test**: JS has no build step or type
+  checker here; the only guard against DOM-reference drift is a test
+  that cross-checks app.js $("...") ids against index.html.
 
 ---
 

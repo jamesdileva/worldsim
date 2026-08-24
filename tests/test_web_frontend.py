@@ -126,3 +126,21 @@ def test_new_world_endpoint(tmp_path):
         assert len(status['settlements']) == 2
     finally:
         store.close()
+
+
+def test_app_js_ids_exist_in_index_html():
+    # S58 regression guard: refreshStatus crashed on a missing
+    # #settlements element (the black-map bug) because console errors
+    # are invisible in the packaged webview. Every element app.js
+    # addresses via $("id") must exist in index.html.
+    import re
+
+    from worldsim.webapp import _web_dir
+
+    html = (_web_dir() / 'index.html').read_text(encoding='utf-8')
+    js = (_web_dir() / 'app.js').read_text(encoding='utf-8')
+    ids_in_html = set(re.findall(r'id="([^"]+)"', html))
+    ids_used = set(re.findall(r'\$\("([^"]+)"\)', js))
+    missing = ids_used - ids_in_html
+    assert not missing, (
+        f'app.js references missing elements: {sorted(missing)}')
