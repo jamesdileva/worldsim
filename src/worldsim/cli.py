@@ -113,15 +113,30 @@ def build_parser() -> argparse.ArgumentParser:
     god.add_argument(
         "--action",
         required=True,
-        choices=["smite", "bless_food", "bless_wood", "bless_stone", "destroy"],
+        choices=[
+            "smite",
+            "bless_food",
+            "bless_wood",
+            "bless_stone",
+            "bless_happiness",
+            "destroy",
+            "spawn_settlement",
+            "freeze",
+        ],
         help="Intervention to apply",
     )
     god.add_argument(
         "--settlement-index", type=int, default=0, help="Target settlement index"
     )
     god.add_argument("--amount", type=int, default=5, help="Magnitude of intervention")
-    god.add_argument("--x", type=int, default=None, help="Tile x (destroy action)")
-    god.add_argument("--y", type=int, default=None, help="Tile y (destroy action)")
+    god.add_argument("--x", type=int, default=None, help="Tile x (destroy/spawn)")
+    god.add_argument("--y", type=int, default=None, help="Tile y (destroy/spawn)")
+    god.add_argument("--name", default=None, help="Name for spawned settlement")
+    god.add_argument(
+        "--force",
+        action="store_true",
+        help="Confirm catastrophic actions (§16.4: smite >= 25 population)",
+    )
     god.add_argument(
         "--db", default=str(DEFAULT_DB_PATH), help="SQLite database path"
     )
@@ -570,7 +585,8 @@ def cmd_step(args: argparse.Namespace) -> int:
             events,
             diplomacy,
             strategy_memory,
-            *_,
+            highways,
+            treaties,
         ) = store.load_latest_snapshot(args.world_id)
         sim = simulation_from_state(
             world,
@@ -584,6 +600,8 @@ def cmd_step(args: argparse.Namespace) -> int:
             event_log=events,
             diplomacy=diplomacy,
             strategy_memory=strategy_memory,
+            highway_projects=highways,
+            treaties=treaties,
         )
         before_tick = sim.tick
         sim.run(args.ticks)
@@ -598,8 +616,10 @@ def cmd_step(args: argparse.Namespace) -> int:
             contested=sim.contested,
             building_debuffs=sim.building_debuffs,
             event_log=sim.event_log,
-        diplomacy=sim.diplomacy,
-        strategy_memory=sim.strategy_memory,
+            diplomacy=sim.diplomacy,
+            strategy_memory=sim.strategy_memory,
+            highway_projects=sim.highway_projects,
+            treaties=sim.treaties,
         )
         store.insert_world_events(sim.event_log)
     finally:
@@ -628,7 +648,8 @@ def cmd_god(args: argparse.Namespace) -> int:
             events,
             diplomacy,
             strategy_memory,
-            *_,
+            highways,
+            treaties,
         ) = store.load_latest_snapshot(args.world_id)
         sim = simulation_from_state(
             world,
@@ -642,16 +663,38 @@ def cmd_god(args: argparse.Namespace) -> int:
             event_log=events,
             diplomacy=diplomacy,
             strategy_memory=strategy_memory,
+            highway_projects=highways,
+            treaties=treaties,
         )
         target = None
         before: dict | None = None
         after: dict | None = None
+        # §16.4: confirmation for catastrophic actions.
+        if args.action == "smite" and args.amount >= 25 and not args.force:
+            print(
+                f"smite of {args.amount} population is catastrophic; "
+                f"re-run with --force to confirm",
+                file=sys.stderr,
+            )
+            return 2
         if args.action == "destroy":
             if args.x is None or args.y is None:
                 print("destroy requires --x and --y", file=sys.stderr)
                 return 2
             before, after = sim.god_destroy_improvement(args.x, args.y)
             target = f"tile({args.x},{args.y})"
+        elif args.action == "spawn_settlement":
+            if args.x is None or args.y is None:
+                print("spawn_settlement requires --x and --y", file=sys.stderr)
+                return 2
+            try:
+                before, after = sim.god_spawn_settlement(
+                    args.x, args.y, name=args.name
+                )
+                target = after.get("name")
+            except ValueError as exc:
+                print(str(exc), file=sys.stderr)
+                return 1
         else:
             if not (0 <= args.settlement_index < len(sim.settlements)):
                 print("invalid --settlement-index", file=sys.stderr)
@@ -673,6 +716,14 @@ def cmd_god(args: argparse.Namespace) -> int:
                 before, after = sim.god_bless_resources(
                     sim.settlements[args.settlement_index], "stone", args.amount
                 )
+            elif args.action == "bless_happiness":
+                before, after = sim.god_bless_happiness(
+                    sim.settlements[args.settlement_index]
+                )
+            elif args.action == "freeze":
+                before, after = sim.god_toggle_freeze(
+                    sim.settlements[args.settlement_index]
+                )
         store.log_god_event(
             args.world_id, sim.tick, args.action, target, before, after
         )
@@ -687,9 +738,11 @@ def cmd_god(args: argparse.Namespace) -> int:
             contested=sim.contested,
             building_debuffs=sim.building_debuffs,
             event_log=sim.event_log,
-        diplomacy=sim.diplomacy,
-        strategy_memory=sim.strategy_memory,
-    )
+            diplomacy=sim.diplomacy,
+            strategy_memory=sim.strategy_memory,
+            highway_projects=sim.highway_projects,
+            treaties=sim.treaties,
+        )
     finally:
         store.close()
     print(f"God event '{args.action}' applied at {describe(sim.tick)}")

@@ -199,6 +199,7 @@ def _encode_settlement(s: Settlement) -> dict:
         "army": s.army,
         "fort_level": s.fort_level,
         "siege_progress": s.siege_progress,
+        "frozen": s.frozen,
     }
 
 
@@ -227,6 +228,7 @@ def _decode_settlement(obj: dict) -> Settlement:
         army=obj.get("army", 0.0),
         fort_level=obj.get("fort_level", 0),
         siege_progress=obj.get("siege_progress", 0),
+        frozen=bool(obj.get("frozen", False)),
     )
 
 

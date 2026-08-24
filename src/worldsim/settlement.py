@@ -106,6 +106,9 @@ class Settlement:
     army: float = 0.0
     fort_level: int = 0
     siege_progress: int = 0
+    # Sprint 38: God Mode freeze — time stops for this settlement
+    # (no decisions, production, growth, or decay) while frozen.
+    frozen: bool = False
 
     @property
     def era(self) -> int:

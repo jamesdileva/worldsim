@@ -854,6 +854,7 @@ class Simulation:
         if not settlement.is_alive:
             self._kill(settlement)
         after = {"population": settlement.population}
+        self._divine(f"smote {settlement.name} ({amount} population)")
         return before, after
 
     def god_bless_resources(
@@ -870,6 +871,7 @@ class Simulation:
                 settlement.resource_inventory.get(resource, 0.0) + amount
             )
             after = {resource: settlement.resource_inventory[resource]}
+        self._divine(f"blessed {settlement.name} with {amount} {resource}")
         return before, after
 
     def god_destroy_improvement(self, x: int, y: int) -> tuple[dict, dict]:
@@ -877,6 +879,70 @@ class Simulation:
         before = {"improvement": int(self.world.improvements[y, x])}
         self.destroy_building(x, y)
         after = {"improvement": int(self.world.improvements[y, x])}
+        self._divine(f"destroyed the improvement at ({x}, {y})")
+        return before, after
+
+    # ------------------------------------------------------------------
+    # God Mode polish (Sprint 38) — §16 surface completion + audit trail
+    # ------------------------------------------------------------------
+
+    def _divine(self, description: str) -> None:
+        """Every intervention leaves a 'divine' event for the audit trail
+        (§16.3 event history / impact tracking)."""
+        self.log_event("divine", [], f"GOD: {description}")
+
+    def god_spawn_settlement(
+        self, x: int, y: int, name: str | None = None
+    ) -> tuple[dict, dict]:
+        """Found a new settlement near (x, y). Deterministic name when not
+        given; registers the standard rule agent."""
+        location = self._find_free_tile_near(x, y)
+        if location is None:
+            raise ValueError(f"no free tile near ({x}, {y})")
+        row, col = location
+        settlement_name = name or generate_name(
+            self.world.seed, len(self.settlements))
+        settlement = Settlement(
+            name=settlement_name,
+            spawn_x=col,
+            spawn_y=row,
+            created_at_tick=self.tick,
+        )
+        self._register_settlement(settlement)
+        before = {"settlements": len(self.settlements) - 1}
+        after = {
+            "settlements": len(self.settlements),
+            "name": settlement.name,
+            "x": col,
+            "y": row,
+        }
+        self._divine(
+            f"spawned settlement {settlement.name} at ({col}, {row})")
+        return before, after
+
+    def god_toggle_freeze(
+        self, settlement: Settlement
+    ) -> tuple[dict, dict]:
+        """Freeze/unfreeze a settlement: time stops for it entirely."""
+        before = {"frozen": settlement.frozen}
+        settlement.frozen = not settlement.frozen
+        after = {"frozen": settlement.frozen}
+        state = "froze" if settlement.frozen else "unfroze"
+        self._divine(f"{state} settlement {settlement.name}")
+        return before, after
+
+    def god_bless_happiness(self, settlement: Settlement) -> tuple[dict, dict]:
+        """Restore full happiness and clear all misery counters."""
+        before = {
+            "happiness": round(settlement.happiness, 4),
+            "negative_food_streak": settlement.negative_food_streak,
+            "low_happiness_progress": settlement.low_happiness_progress,
+        }
+        settlement.happiness = 1.0
+        settlement.negative_food_streak = 0
+        settlement.low_happiness_progress = 0
+        after = {"happiness": 1.0, "misery_counters": 0}
+        self._divine(f"blessed {settlement.name} with contentment")
         return before, after
 
     # ------------------------------------------------------------------
@@ -1673,6 +1739,10 @@ class Simulation:
         skip = skip_agent_ids or set()
         for idx, settlement in enumerate(self.settlements):
             if not settlement.is_alive:
+                continue
+            # Sprint 38: frozen settlements skip their entire tick —
+            # no decisions, production, growth, or decay.
+            if settlement.frozen:
                 continue
             # --- Agent decision cycle (Sprint 7) -----------------------
             agent = self.agents[idx] if idx < len(self.agents) else None

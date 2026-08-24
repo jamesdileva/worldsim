@@ -5,6 +5,44 @@ Decisions worth remembering are marked **[DECISION]**.
 
 ---
 
+## Session 40 — 2026-08-23 — Sprint 38: God Controls Polish (Phase 7 begins)
+
+**What was built**
+- §16 surface completion for controls:
+  - `god_spawn_settlement(x, y, name=None)` — free-tile placement,
+    deterministic generated names (or explicit), rule agent auto-
+    registered with index alignment
+  - `god_toggle_freeze` — time stops ENTIRELY for a settlement: no
+    decisions, production, consumption, growth, scarcity decay, or
+    death; absolute protection while frozen
+  - `god_bless_happiness` — happiness→1.0 + misery counters cleared
+- Audit trail (§16.3): every god action logs a "divine" event prefixed
+  "GOD:" alongside its before/after dicts — including the pre-existing
+  smite/bless/destroy which previously went unaudited in-world
+- Safety (§16.4): CLI requires --force for smite ≥ 25 population
+- CLI gained spawn_settlement/bless_happiness/freeze actions
+- Persistence bug fixed en route: `cmd_step`/`cmd_god` used the S33-era
+  `*_,` unpack and silently DROPPED highways+treaties on every
+  load-step-save cycle; both now pass them through explicitly.
+- Live smoke: spawned Unovaova at (32,32), froze Brazemi through 60
+  ticks (pop unchanged, food only dropped by upkeep-free trade effects),
+  blessed contentment; four GOD: events in the log.
+- Phase 7 plan docs expanded: full detail for Sprints 38–43.
+- 17 new tests. Fast suite: 503 passing.
+
+### Decisions
+
+- **[DECISION] Freeze is absolute**: no partial ticking. A frozen
+  settlement cannot starve, decay, be raided-out of existence by timers,
+  or grow — the point is suspending judgment on its fate.
+- **[DECISION] Every intervention audited in-world**, not just in the
+  SQLite god_events table: divine events flow through the normal event
+  log so LLM advisors (event-triggered reasoning) can react to gods.
+- **[DECISION] Confirmation threshold = 25 pop**: small enough to catch
+  real damage, loose enough not to nag for experiments.
+
+---
+
 ## Session 39 — 2026-08-23 — Sprint 37: Long-Term Historical Simulation
 
 **What was built**

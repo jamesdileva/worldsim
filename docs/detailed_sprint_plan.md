@@ -742,6 +742,123 @@ history. Several items extend existing systems (diplomacy, collapse).
 | 36 | Collapse/recovery depth | Extends S5 ruins/happiness with era mechanics |
 | 37 | Long-term historical simulation | Stability + performance at 100k+ ticks |
 
+### Sprint 38 — God Controls Polish (detailed)
+
+**Duration:** 1 week
+**Deliverable:** §16 surface audit completed for controls; every
+intervention audited; freeze protection; catastrophic-action guard.
+
+**Tasks:**
+- New controls: `god_spawn_settlement` (free tile near target, rule
+  agent auto-registered, deterministic/generated names),
+  `god_toggle_freeze` (time stops entirely for a settlement — no
+  decisions, production, growth, decay, or scarcity death),
+  `god_bless_happiness` (happiness→1.0, misery counters cleared)
+- Audit trail (§16.3): EVERY god action logs a "divine" event
+  prefixed "GOD:" alongside its before/after dicts
+- Safety (§16.4): CLI `--force` required for smite ≥ 25 population
+- Persistence: `Settlement.frozen` flag round-trips
+- Bug fixed en route: `cmd_step`/`cmd_god` silently dropped highways +
+  treaties on load-step-save (the S33/S34 `*_,` unpack cost)
+
+**Acceptance criteria:**
+- Frozen settlements survive anything and change not at all
+- Every intervention leaves exactly one divine event
+- Catastrophic smite refused without --force; frozen contract untouched
+
+### Sprint 39 — Disaster Toolkit (detailed)
+
+**Duration:** 1 week
+**Deliverable:** Manual disaster authoring beyond random events.
+
+**Tasks:**
+- `god_trigger_disaster(type, x, y, radius, duration)`: drought / fire /
+  flood / earthquake on demand with full parameter control
+- Zone preview in before/after (affected settlements + tiles at risk)
+- Divine audit integration + CLI wiring (`--action trigger_disaster`)
+- Deterministic application identical to random-event paths (reuses the
+  Sprint 5 `_apply_*` mechanics)
+
+**Acceptance criteria:** authored disasters behave identically to random
+ones; affected-settlement lists deterministic; audited.
+
+### Sprint 40 — Resource Manipulation Depth (detailed)
+
+**Duration:** 1 week
+**Deliverable:** Spawn/remove/bless at scale with region targeting.
+
+**Tasks:**
+- Region-targeted operations: circle/rectangle selectors over tiles
+- Mass bless/strip across settlements matching a filter (alive/archetype)
+- Per-tile resource yield overrides (blessed land) persisted on World
+
+**Acceptance criteria:** region math deterministic; overrides round-trip;
+audited; frozen contract untouched.
+
+### Sprint 41 — Terrain Manipulation (detailed)
+
+**Duration:** 1 week
+**Deliverable:** Terraform tiles.
+
+**Tasks:**
+- `god_terraform(x, y, terrain)` with region variant; invalidates all
+  derived caches (food yields, movement); buildings on invalid terrain
+  handled (decay or removal policy documented)
+- Persistence via terrain array (already serialized)
+
+**Acceptance criteria:** cache invalidation proven (no stale yields);
+audited; determinism preserved.
+
+### Sprint 42 — Nuclear Events (detailed)
+
+**Duration:** 1 week
+**Deliverable:** Mass destruction with lasting contamination.
+
+**Tasks:**
+- `god_nuke(x, y)`: destroys improvements/population in radius, leaves a
+  contamination zone (decades-long debuff on yields + happiness)
+- Fallout decays deterministically; contamination visible in summaries
+- Requires --force twice (§16.4)
+
+**Acceptance criteria:** contamination persists then clears on schedule;
+survivors migrate per Sprint 36 rules; audited.
+
+### Sprint 43 — Timeline Branching / Undo (detailed)
+
+**Duration:** 1 week
+**Deliverable:** Reverse/replay simulation (§16.2).
+
+**Tasks:**
+- Auto-snapshot before every intervention (§16.4) into the store
+- `worldsim undo --world-id` reverts to the pre-intervention snapshot
+- Branch ids so alternate timelines coexist
+
+**Acceptance criteria:** undo restores exact prior state (byte-equal
+summary); branches replay independently from the same seed.
+
+**Duration:** 1 week
+**Deliverable:** Stability + performance at 100k+ ticks: bounded memory,
+epoch history, memoized hot paths, soak-tested.
+
+**Tasks:**
+- Bounded structures: event log caps at EVENT_LOG_MAX=20k (oldest
+  dropped; events are advisory/log-only so physics never depended on
+  them); experience buffer capped at 50k rows
+- Epoch history: every HISTORY_INTERVAL_TICKS=500 the sim records a
+  compact record {tick, settlements_alive, total_population,
+  wars_active, routes_active, mean_happiness, prices} — ~200 records
+  per 100k ticks
+- Performance: food_income/food_capacity memoized per tick via the
+  existing _cached machinery
+- Slow-tier soak tests: 10k ticks within a time budget, traced memory
+  growth bounded over warm ticks, total-collapse runs keep ticking,
+  byte-determinism at horizon
+
+**Acceptance criteria:**
+- ≥150 ticks/s on a 3-settlement size-64 world (100k ticks ≈ minutes)
+- Memory growth roughly flat once warm (<100 MB per 2k traced ticks)
+- Determinism preserved at horizon; frozen contract untouched
+
 ### Sprint 37 — Long-Term Historical Simulation (detailed)
 
 **Duration:** 1 week
