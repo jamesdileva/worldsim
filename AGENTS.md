@@ -35,7 +35,8 @@ Phase 10), **Phase 7 ✅ COMPLETE** (S38 god controls polish, S39 disaster toolk
 S40 resource manipulation depth, S41 terrain manipulation, S42 nuclear
 events, S43 timeline branching/undo with byte-exact restore + branch
 timelines; sprint docs expanded through Phase 10), **Phase 8 in
-progress** (S44 advanced visualization done).
+progress** (S44 advanced visualization done; S45 civilization histories
+done).
 
 **Test tiers:** `pytest` = fast suite (~250 tests, ~3–5 min);
 `pytest -m slow` = long integration runs.
@@ -93,6 +94,7 @@ progress** (S44 advanced visualization done).
 | `e50d5e0` | 42 | Nuclear events: blast annihilation, contamination zones (20-year yield/happiness debuffs), double-confirmation CLI |
 | `30406f3` | 43 | Timeline branching/undo: undo_points snapshots, worldsim undo + --as-world branches, byte-exact restore (**Phase 7 complete**) |
 | `a3bca56` | 44 | Advanced visualization: deterministic ASCII maps + overlays, settlement panels, byte-reproducible PNG exports (**Phase 8 begins**) |
+| `a67b88b` | 45 | Civilization histories: event-log chronicles, civilizations summary, population curves + chart export |
 
 ---
 
@@ -706,6 +708,26 @@ Agents replace auto-rules; the frozen RL contract is born
   everything" extended to pixels.
 - **[DECISION] Contamination glyph outranks settlements**: a ! over your
   capital's letter is exactly the alarm a map should raise.
+
+### Session 47 — Sprint 45 (this session)
+- `histories.py`: `build_chronicle` — each civilization's saga
+  reconstructed deterministically from the persisted event log
+  (founding, techs, eras, wars, battles, treaties, disasters, divine
+  interventions, migration, fall/rebirth cross-references);
+  `civilizations_summary` one-liners; `population_curves` from S37
+  epoch history (now recording a per-settlement `populations` map).
+- CLI: `worldsim chronicle --world-id [--settlement-index] [--png]`
+  with matplotlib population-curve export.
+- Live smoke on seed 42 @1200 ticks: Brazemi's chronicle showed
+  founding, a divine blessing, trade routes, alliances, agriculture →
+  masonry → engineering discoveries, Era 2 advancement, and treaties —
+  emergent history readable as a saga. Fast suite: 582 passing.
+- **[DECISION] Chronicles derive from the event log** — zero new state,
+  nothing new persisted; text works across save/load while curves are
+  RAM-only within a run (documented limitation).
+- **[DECISION] Divine events now carry actor_ids**: god interventions
+  appear in the affected settlements' chronicles — the audit trail got
+  strictly better for free.
 
 ---
 
