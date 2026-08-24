@@ -36,7 +36,9 @@ S40 resource manipulation depth, S41 terrain manipulation, S42 nuclear
 events, S43 timeline branching/undo with byte-exact restore + branch
 timelines; sprint docs expanded through Phase 10), **Phase 8 ✅ COMPLETE** (S44 visualization, S45 civilization histories,
 S46 event timeline, S47 learning dashboard, S48 replay system, S49 world
-comparison, S50 long-running autonomous world done).
+comparison, S50 long-running autonomous world done). **S51 live shell
+DONE** (interactive World Simulator shell — one session owns one world;
+S52 serve + S53 web frontend + S54 .exe packaging remain).
 **Phase 9 PLANNED** (The World Simulator App, Sprints 51–54:
 live shell -> serve web API -> browser frontend -> pywebview +
 PyInstaller .exe; former Advanced-Intelligence phase renumbered to
@@ -104,6 +106,7 @@ Phase 10).
 | `6662500` | 48 | Replay system: timewalk module over the snapshot trail, exact-tick frames, animated GIF export |
 | `3b894fc` | 49 | World comparison: structural diff (settlements/counters/events), markdown report, comparison chart |
 | `aa21dbb` | 50 | Long-running autonomous world: simulate --report-dir living-world bundle; visual verification via replay GIF (**roadmap complete**) |
+| `60e7300` | 51 | Interactive shell: worldsim live REPL owning one world in memory — step/watch/inspect + full god surface with confirmations, session undo, branch (**Phase 9 begins**) |
 
 ---
 
@@ -825,6 +828,25 @@ Agents replace auto-rules; the frozen RL contract is born
   roadmap's "living ant farm" vision, end to end.
 - **[NOTE] Curves come from in-RAM epoch history**; reloading a saved
   world starts epochs fresh (documented S45 limitation).
+
+### Session 54 - Sprint 51 (this session)
+- live.py: stdlib cmd-based WorldShell owning one world in memory:
+  lifecycle (new/save/load/branch), time control (step/watch with
+  Ctrl+C pause), inspection (status/map/panels/chronicle/timeline),
+  and the full god surface through the SAME handlers + undo-point
+  capture as the CLI. CLI entry: worldsim live [--world-id].
+- Live smoke: full play session (new -> step -> chronicle -> smite
+  -> undo -> bless -> spawn -> save -> branch) ran cleanly.
+- Bug fixed from smoke: status lines lacked settlement names.
+- 16 new tests driving the shell via onecmd; confirmations
+  monkeypatched. Fast suite: 643 passing.
+- **[DECISION] Undo swaps in a new Simulation object**: callers
+  re-resolve settlements by name after undo; pinned by test.
+- **[DECISION] Session undo separate from persisted points**:
+  _commit_mutation writes the store row AND stages an in-session
+  restore pointer, consumed once per intervention like the CLI.
+- **[DECISION] y/n confirmation replaces --force flags in-shell**:
+  same thresholds, friendlier interface.
 
 ### Session 53
 - Phase 9 scoped: The World Simulator App (Sprints 51–54).
