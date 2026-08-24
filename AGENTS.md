@@ -34,7 +34,8 @@ S36 collapse/recovery depth, S37 long-horizon stability: 100k ticks ≈
 Phase 10), **Phase 7 ✅ COMPLETE** (S38 god controls polish, S39 disaster toolkit,
 S40 resource manipulation depth, S41 terrain manipulation, S42 nuclear
 events, S43 timeline branching/undo with byte-exact restore + branch
-timelines; sprint docs expanded through Phase 10).
+timelines; sprint docs expanded through Phase 10), **Phase 8 in
+progress** (S44 advanced visualization done).
 
 **Test tiers:** `pytest` = fast suite (~250 tests, ~3–5 min);
 `pytest -m slow` = long integration runs.
@@ -91,6 +92,7 @@ timelines; sprint docs expanded through Phase 10).
 | `a375795` | 41 | Terrain manipulation: god_terraform single/region, cache invalidation, improvement-compatibility policy |
 | `e50d5e0` | 42 | Nuclear events: blast annihilation, contamination zones (20-year yield/happiness debuffs), double-confirmation CLI |
 | `30406f3` | 43 | Timeline branching/undo: undo_points snapshots, worldsim undo + --as-world branches, byte-exact restore (**Phase 7 complete**) |
+| `a3bca56` | 44 | Advanced visualization: deterministic ASCII maps + overlays, settlement panels, byte-reproducible PNG exports (**Phase 8 begins**) |
 
 ---
 
@@ -688,6 +690,22 @@ Agents replace auto-rules; the frozen RL contract is born
 - **[WHY] Byte-exact restore as acceptance**: exact-equality summaries
   have now caught two latent bugs (happiness reset here, transposed
   territory checks in S31).
+
+### Session 46 — Sprint 44 (this session)
+- `visualization.py`: render_ascii_map with deterministic glyph
+  priority (contamination ! > settlement initial > ruin X > road # >
+  building b > terrain), crop windows, settlement panels, export_map_png
+  (fixed palette + Agg → **byte-identical PNGs** for identical worlds).
+- CLI: `worldsim map --world-id [--crop] [--png] [--panels]`.
+- Live smoke on the S43 test world: region map with roads/buildings/
+  initials + legend, panels, PNG written.
+- Phase 8 plan docs: Sprint 44 detailed.
+- 12 new tests. Fast suite: 569 passing.
+- **[DECISION] Byte-deterministic PNG export**: identical worlds produce
+  identical binary output — "identical worlds produce identical
+  everything" extended to pixels.
+- **[DECISION] Contamination glyph outranks settlements**: a ! over your
+  capital's letter is exactly the alarm a map should raise.
 
 ---
 
