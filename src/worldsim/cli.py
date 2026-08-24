@@ -324,6 +324,26 @@ def build_parser() -> argparse.ArgumentParser:
         "--db", default=str(DEFAULT_DB_PATH), help="SQLite database path"
     )
 
+    cmp_worlds = sub.add_parser(
+        "compare",
+        help="Structurally compare two saved worlds (Sprint 49)",
+    )
+    cmp_worlds.add_argument("--a", required=True, dest="world_a",
+                            help="First world id")
+    cmp_worlds.add_argument("--b", required=True, dest="world_b",
+                            help="Second world id")
+    cmp_worlds.add_argument(
+        "--png", default=None,
+        help="Optional grouped-bar chart output path",
+    )
+    cmp_worlds.add_argument(
+        "--markdown", default=None,
+        help="Optional markdown report output path",
+    )
+    cmp_worlds.add_argument(
+        "--db", default=str(DEFAULT_DB_PATH), help="SQLite database path"
+    )
+
     bench = sub.add_parser(
         "benchmark", help="Run the rule-based agent on benchmark worlds"
     )
@@ -1318,6 +1338,52 @@ def cmd_replay(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_compare_worlds(args: argparse.Namespace) -> int:
+    """Sprint 49: structural comparison of two saved worlds."""
+    from .worldcompare import (
+        compare_worlds,
+        export_compare_chart,
+        render_compare_markdown,
+    )
+
+    store = WorldStore(args.db)
+    try:
+        sim_a = _load_sim_from_store(store, args.world_a)
+        sim_b = _load_sim_from_store(store, args.world_b)
+    finally:
+        store.close()
+
+    comparison = compare_worlds(sim_a, sim_b)
+    if args.markdown:
+        from pathlib import Path
+
+        md = Path(args.markdown)
+        md.parent.mkdir(parents=True, exist_ok=True)
+        md.write_text(render_compare_markdown(comparison), encoding="utf-8")
+        print(f"markdown written to {md}")
+    print(f"identical: {comparison['identical']}")
+    settlements = comparison["settlements"]
+    for name in settlements["only_in_a"]:
+        print(f"  only in A: {name}")
+    for name in settlements["only_in_b"]:
+        print(f"  only in B: {name}")
+    for change in settlements["changed"]:
+        print(
+            f"  {change['name']}: differs in {', '.join(change['fields'])}"
+        )
+    counts = comparison["counts"]
+    for key in counts["differences"]:
+        print(f"  counter {key}: A={counts['a'].get(key)} "
+              f"B={counts['b'].get(key)}")
+    events = comparison["events"]
+    print(f"events only in A: {events['only_in_a_count']} | "
+          f"only in B: {events['only_in_b_count']}")
+    if args.png:
+        path = export_compare_chart(sim_a, sim_b, args.png)
+        print(f"chart written to {path}")
+    return 0
+
+
 def cmd_undo(args: argparse.Namespace) -> int:
     """Sprint 43: revert to the last pre-intervention snapshot, either in
     place or into a branch world (alternate timeline)."""
@@ -2163,6 +2229,7 @@ def main(argv: list[str] | None = None) -> int:
         "chronicle": cmd_chronicle,
         "timeline": cmd_timeline,
         "replay": cmd_replay,
+        "compare": cmd_compare_worlds,
         "benchmark": cmd_benchmark,
         "rl": cmd_rl,
         "llm": cmd_llm,

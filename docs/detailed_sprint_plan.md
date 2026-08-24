@@ -974,6 +974,26 @@ trail (§18 offline catch-up / step-by-step).
   frames mutate freely without side effects; GIF exports bounded on
   long runs (stride + max_frames); frozen contract untouched
 
+### Sprint 49 — World Comparison (detailed)
+
+**Duration:** 1 week
+**Deliverable:** Structural diff between two saved worlds — the natural
+companion to Sprint 43 branch timelines.
+
+**Tasks:**
+- `worldcompare.py`: `compare_worlds(sim_a, sim_b)` — per-settlement
+  field-level diff (population/era/techs/army/territory/resources),
+  world counters (wars/alliances/treaties/highways/zones/routes/ruins),
+  event divergence keyed by (tick, type, description); `identical` flag;
+  `render_compare_markdown` table report; `export_compare_chart` grouped
+  bars per shared settlement (byte-deterministic)
+- CLI `worldsim compare --a W1 --b W2 [--png] [--markdown]`
+
+**Acceptance criteria:**
+- Same-seed same-tick worlds compare identical; god interventions and
+  diverged histories produce precise field/event diffs; deterministic
+  outputs; frozen contract untouched
+
 ### Sprint 37 — Long-Term Historical Simulation (detailed)
 
 **Duration:** 1 week
