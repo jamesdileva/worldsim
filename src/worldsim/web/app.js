@@ -108,7 +108,16 @@ $("map").onclick = (event) => {
 };
 
 async function refreshStatus() {
-  const status = await (await api("/api/status")).json();
+  let status;
+  try {
+    status = await (await api("/api/status")).json();
+  } catch (e) {
+    // No world loaded (fresh desktop launch): offer creation.
+    $("create-box").style.display = "block";
+    $("clock").textContent = "— no world loaded";
+    return;
+  }
+  $("create-box").style.display = "none";
   $("clock").textContent =
     `— tick ${status.tick} (${status.date}) | seed ${status.seed}`;
   const list = $("settlements");
@@ -225,6 +234,17 @@ $("god-form").onsubmit = async (event) => {
   }
   refreshAll();
 };
+
+$("btn-new").onclick = () =>
+  api("/api/new", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      seed: Number($("new-seed").value),
+      settlements: Number($("new-settlements").value),
+    }),
+  }).then(refreshAll)
+    .catch((e) => { $("god-result").textContent = e.message; });
 
 function connectSocket() {
   const protocol = location.protocol === "https:" ? "wss" : "ws";

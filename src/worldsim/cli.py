@@ -269,6 +269,18 @@ def build_parser() -> argparse.ArgumentParser:
         "--db", default=str(DEFAULT_DB_PATH), help="SQLite database path"
     )
 
+    desktop = sub.add_parser(
+        "desktop",
+        help="Desktop window over the web API (requires pywebview; "
+             "Sprint 54)",
+    )
+    desktop.add_argument("--world-id", default=None)
+    desktop.add_argument("--host", default="127.0.0.1")
+    desktop.add_argument("--port", type=int, default=8600)
+    desktop.add_argument(
+        "--db", default=str(DEFAULT_DB_PATH), help="SQLite database path"
+    )
+
     chron = sub.add_parser(
         "chronicle",
         help="Per-civilization histories + population curves (Sprint 45)",
@@ -2365,6 +2377,11 @@ def main(argv: list[str] | None = None) -> int:
         "timeline": cmd_timeline,
         "live": cmd_live,
         "serve": cmd_serve,
+        "desktop": lambda a: __import__(
+            "worldsim.desktop", fromlist=["launch_desktop"]
+        ).launch_desktop(
+            host=a.host, port=a.port, db_path=a.db, world_id=a.world_id
+        ),
         "replay": cmd_replay,
         "compare": cmd_compare_worlds,
         "benchmark": cmd_benchmark,

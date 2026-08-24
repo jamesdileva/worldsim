@@ -247,6 +247,13 @@ class WorldRefRequest(BaseModel):
     world_id: str
 
 
+class NewWorldRequest(BaseModel):
+    seed: int = 42
+    size: int = 64
+    settlements: int = 3
+
+
+
 # Actions that demand explicit confirmation through the API.
 CATASTROPHIC_ACTIONS = {"nuke", "smite_region"}
 CONFIRM_THRESHOLD_SMITE = 25
@@ -429,6 +436,22 @@ def create_app(session: WorldSession) -> FastAPI:
         except Exception as exc:
             raise HTTPException(404, str(exc))
         return {"loaded": request.world_id, "tick": session.sim.tick}
+
+    @app.post("/api/new")
+    def api_new(request: NewWorldRequest):
+        """Create a fresh in-memory world (desktop-first experience)."""
+        from .world import World
+
+        size = max(16, min(256, request.size))
+        count = max(1, min(12, request.settlements))
+        session.sim = Simulation(World(seed=request.seed, size=size))
+        spawned = session.sim.spawn_settlements(count=count)
+        session.world_id = None
+        return {
+            "created": True,
+            "seed": request.seed,
+            "settlements": [s.name for s in spawned],
+        }
 
     @app.post("/api/god/{action}")
     def api_god(action: str, request: GodRequest):

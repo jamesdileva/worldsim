@@ -110,3 +110,19 @@ def test_population_chart_404_without_epochs(tmp_path):
 def test_frozen_contract_unchanged():
     assert NUM_ACTIONS == 62
     assert OBSERVATION_DIM == 60
+
+
+def test_new_world_endpoint(tmp_path):
+    store = WorldStore(tmp_path / 'w.db')
+    session = WorldSession(store=store)
+    client = TestClient(create_app(session))
+    try:
+        # Fresh desktop launch: no world yet.
+        assert client.get('/api/status').status_code == 409
+        response = client.post('/api/new', json={
+            'seed': 7, 'settlements': 2})
+        assert response.status_code == 200
+        status = client.get('/api/status').json()
+        assert len(status['settlements']) == 2
+    finally:
+        store.close()

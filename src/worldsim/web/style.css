@@ -38,8 +38,11 @@ main { display: flex; gap: 16px; padding: 12px 16px; flex-wrap: wrap; }
   border: 1px solid #3a4048; background: #fff;
 }
 aside { min-width: 320px; max-width: 400px; flex: 1; }
-#selected-box { background: var(--panel); border: 1px solid #3a4048;
-  border-radius: 6px; padding: 8px 10px; }
+#selected-box, #create-box {
+  background: var(--panel); border: 1px solid #3a4048;
+  border-radius: 6px; padding: 8px 10px; margin-bottom: 10px;
+}
+#btn-new { width: 100%; margin-top: 4px; }
 #selected-name { color: var(--accent); font-weight: 600; }
 ul { list-style: none; padding-left: 0; max-height: 240px; overflow-y: auto; }
 li { padding: 2px 0; border-bottom: 1px solid #23282f; font-size: 12.5px; }

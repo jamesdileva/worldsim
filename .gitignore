@@ -11,3 +11,5 @@ data/
 
 # Generated visualization exports (Sprint 44/45 demos)
 screenshots/
+
+entry_worldsim.py

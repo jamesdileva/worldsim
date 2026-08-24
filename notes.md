@@ -5,6 +5,43 @@ Decisions worth remembering are marked **[DECISION]**.
 
 ---
 
+## Session 57 — 2026-08-23 — Sprint 54: Desktop Packaging (.exe) — Phase 9 complete
+
+**What was built**
+- `desktop.py`: `worldsim desktop` — spawns the FastAPI server in a
+  background thread, opens a pywebview native window (Edge WebView2)
+  pointed at it; graceful error if pywebview missing (points at serve).
+- `worldsim.spec` + `scripts/build_exe.ps1` + `entry_worldsim.py`:
+  PyInstaller onedir build bundling web/ as data, uvicorn dynamic
+  imports as hiddenimports, RL stack (torch/SB3/scipy) excluded to keep
+  size down. Output: `dist/worldsim/worldsim.exe`.
+- **Fresh-launch experience completed**: `POST /api/new {seed,
+  settlements}` creates an in-memory world (a double-clicked exe starts
+  with none); frontend shows a create-world panel when /api/status
+  returns 409.
+- Live build + smoke on the real exe: window opened (user clicked
+  "create world" in it!), then scripted checks all passed — index/
+  app.js served, step, god smite via HTTP, undo restores, map.png
+  export (~8 KB), grid arrays correct.
+- Size: ~229 MB onedir (numpy+matplotlib dominate; honest number vs the
+  ~20 MB estimate — matplotlib is the price of charts everywhere).
+- 9 new/updated tests incl. POST /api/new. Fast suite: 662 passing.
+
+### Decisions
+
+- **[DECISION] onedir over onefile**: fast startup; onefile extracts to
+  temp every launch for a ~230 MB payload.
+- **[WHY] Exclude the RL stack from the exe**: training lives in the
+  CLI workflow; shipping torch would triple the size for features the
+  app doesn't surface yet.
+- **Gotcha**: FastAPI treats pydantic models nested inside a factory
+  function inconsistently as body params — module-level request models
+  only.
+- **[NOTE] The user's click in the live window confirmed the GUI loop:
+  window -> frontend -> API -> world creation works packaged.**
+
+---
+
 ## Session 56 — 2026-08-23 — Sprint 53 (v1.1 polish): click-to-target + readability
 
 **User feedback drove this iteration** after a live session on the
