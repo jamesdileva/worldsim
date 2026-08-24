@@ -947,6 +947,148 @@ class Simulation:
         return before, after
 
     # ------------------------------------------------------------------
+    # God Mode depth (Sprint 40) — region targeting + mass operations
+    # ------------------------------------------------------------------
+
+    def _apply_resource_change(
+        self, settlement: Settlement, resource: str, amount: float
+    ) -> tuple[float, float]:
+        """Apply one resource delta; returns (before, after)."""
+        if resource == "food":
+            before = settlement.food_stock
+            settlement.food_stock = before + amount
+            return before, settlement.food_stock
+        inventory = settlement.resource_inventory
+        before = inventory.get(resource, 0.0)
+        after = max(0.0, before + amount)
+        inventory[resource] = after
+        return before, after
+
+    def god_bless_region(
+        self,
+        resource: str,
+        x: int,
+        y: int,
+        radius: int,
+        amount: float,
+    ) -> tuple[dict, dict]:
+        """Grant a resource to every alive settlement spawned in the
+        circle (Sprint 40 region targeting)."""
+        from .regions import circle_tiles, settlements_with_spawns_in
+
+        tiles = set(circle_tiles(self.world.size, x, y, radius))
+        targets = settlements_with_spawns_in(self, tiles)
+        changes = {}
+        for s in targets:
+            before, after_v = self._apply_resource_change(s, resource, amount)
+            changes[s.name] = {"before": round(before, 2),
+                               "after": round(after_v, 2)}
+        result = {"resource": resource, "amount": amount,
+                  "affected": len(targets), "changes": changes}
+        self._divine(
+            f"blessed {len(targets)} settlement(s) in the region with "
+            f"{amount} {resource}"
+        )
+        return {"region": [x, y, radius], **result}, result
+
+    def god_strip_region(
+        self, resource: str, x: int, y: int, radius: int
+    ) -> tuple[dict, dict]:
+        """Remove a resource entirely from every settlement in the circle."""
+        from .regions import circle_tiles, settlements_with_spawns_in
+
+        tiles = set(circle_tiles(self.world.size, x, y, radius))
+        targets = settlements_with_spawns_in(self, tiles)
+        stripped = {}
+        for s in targets:
+            before, after_v = self._apply_resource_change(s, resource, 0.0)
+            if resource == "food":
+                s.food_stock = 0.0
+                after_v = 0.0
+            else:
+                s.resource_inventory[resource] = 0.0
+                after_v = 0.0
+            stripped[s.name] = round(before, 2)
+        result = {"resource": resource, "stripped_from": len(targets),
+                  "amounts_before": stripped}
+        self._divine(
+            f"stripped all {resource} from {len(targets)} settlement(s)"
+        )
+        return {"region": [x, y, radius], **result}, result
+
+    def god_smite_region(
+        self, x: int, y: int, radius: int, amount: int
+    ) -> tuple[dict, dict]:
+        """Smite every settlement in the circle (catastrophic — CLI gates
+        on --force)."""
+        from .regions import circle_tiles, settlements_with_spawns_in
+
+        tiles = set(circle_tiles(self.world.size, x, y, radius))
+        targets = settlements_with_spawns_in(self, tiles)
+        outcomes = {}
+        for s in targets:
+            pop_before = s.population
+            self.god_smite(s, amount)
+            outcomes[s.name] = {
+                "population": f"{pop_before}->{s.population}",
+                "alive": s.is_alive,
+            }
+        result = {"smited": len(targets), "outcomes": outcomes}
+        self._divine(f"smiting a whole region ({len(targets)} settlements)")
+        return {"region": [x, y, radius], **result}, result
+
+    def god_mass_bless(
+        self, resource: str, amount: float,
+        archetype: str | None = None,
+    ) -> tuple[dict, dict]:
+        """Bless every alive settlement matching the archetype filter
+        (None = everyone)."""
+        targets = sorted(
+            (
+                s for s in self.settlements
+                if s.is_alive and (
+                    archetype is None
+                    or s.personality.get("archetype") == archetype
+                )
+            ),
+            key=lambda s: s.name,
+        )
+        changes = {}
+        for s in targets:
+            before, after_v = self._apply_resource_change(s, resource, amount)
+            changes[s.name] = {"before": round(before, 2),
+                               "after": round(after_v, 2)}
+        result = {
+            "resource": resource, "amount": amount,
+            "filter": archetype or "all", "blessed": len(targets),
+            "changes": changes,
+        }
+        self._divine(
+            f"mass blessing {len(targets)} settlement(s) "
+            f"({archetype or 'all'}) with {amount} {resource}"
+        )
+        return {"filter": archetype}, result
+
+    def god_bless_land(
+        self, x: int, y: int, radius: int, bonus: float
+    ) -> tuple[dict, dict]:
+        """Permanently enrich land: every tile in the circle gains `bonus`
+        food yield (Sprint 40 yield overrides)."""
+        from .regions import circle_tiles
+
+        tiles = circle_tiles(self.world.size, x, y, radius)
+        for ty, tx in tiles:
+            self.world.tile_food_bonus[(ty, tx)] = (
+                self.world.tile_food_bonus.get((ty, tx), 0.0) + bonus
+            )
+        self._invalidate_cache()
+        result = {"tiles_enriched": len(tiles), "bonus_each": bonus}
+        self._divine(
+            f"enriched {len(tiles)} tiles with +{bonus} food yield"
+        )
+        return {"region": [x, y, radius]}, result
+
+    # ------------------------------------------------------------------
     # Disasters (Sprint 5)
     # ------------------------------------------------------------------
 
@@ -1687,6 +1829,14 @@ class Simulation:
         idx = self.settlements.index(settlement)
         owned = self.world.ownership == idx
         income = float(self.world.food_yield_grid()[owned].sum())
+        # Sprint 40: god-blessed land adds per-tile food yield bonuses.
+        if self.world.tile_food_bonus:
+            bonus = sum(
+                v for (ty, tx), v in self.world.tile_food_bonus.items()
+                if 0 <= ty < self.world.size and 0 <= tx < self.world.size
+                and owned[ty, tx]
+            )
+            income += bonus
         from .tech import ERA3_FARM_OUTPUT_BONUS
 
         farm_mult = 1.0 + (

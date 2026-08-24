@@ -123,6 +123,11 @@ def build_parser() -> argparse.ArgumentParser:
             "spawn_settlement",
             "freeze",
             "trigger_disaster",
+            "bless_region",
+            "strip_region",
+            "smite_region",
+            "mass_bless",
+            "bless_land",
         ],
         help="Intervention to apply",
     )
@@ -139,6 +144,20 @@ def build_parser() -> argparse.ArgumentParser:
     god.add_argument(
         "--duration", type=int, default=None,
         help="Duration in ticks for trigger_disaster",
+    )
+    god.add_argument(
+        "--resource",
+        choices=["food", "wood", "stone", "metal"],
+        default=None,
+        help="Resource for region/mass operations",
+    )
+    god.add_argument(
+        "--archetype", default=None,
+        help="Archetype filter for mass_bless (None = all)",
+    )
+    god.add_argument(
+        "--bonus", type=float, default=None,
+        help="Per-tile food yield bonus for bless_land",
     )
     god.add_argument(
         "--settlement-index", type=int, default=0, help="Target settlement index"
@@ -692,6 +711,13 @@ def cmd_god(args: argparse.Namespace) -> int:
                 file=sys.stderr,
             )
             return 2
+        if args.action == "smite_region" and not args.force:
+            print(
+                "smite_region affects every settlement in the zone; "
+                "re-run with --force to confirm",
+                file=sys.stderr,
+            )
+            return 2
         if args.action == "destroy":
             if args.x is None or args.y is None:
                 print("destroy requires --x and --y", file=sys.stderr)
@@ -733,6 +759,46 @@ def cmd_god(args: argparse.Namespace) -> int:
                 print(str(exc), file=sys.stderr)
                 return 1
             target = f"{args.disaster_type}({args.x},{args.y})"
+        elif args.action in (
+            "bless_region", "strip_region", "smite_region", "bless_land",
+            "mass_bless",
+        ):
+            region_ops = {"bless_region", "strip_region", "smite_region",
+                          "bless_land"}
+            if args.action in region_ops and not (
+                args.x is not None and args.y is not None
+                and args.radius is not None
+            ):
+                print(f"{args.action} requires --x --y --radius",
+                      file=sys.stderr)
+                return 2
+            if args.action != "bless_land" and args.action != "smite_region" \
+                    and not args.resource:
+                print(f"{args.action} requires --resource", file=sys.stderr)
+                return 2
+            if args.action == "bless_region":
+                before, after = sim.god_bless_region(
+                    args.resource, args.x, args.y, args.radius, args.amount)
+                target = f"{args.resource}+{args.amount} in r{args.radius}"
+            elif args.action == "strip_region":
+                before, after = sim.god_strip_region(
+                    args.resource, args.x, args.y, args.radius)
+                target = f"strip {args.resource} in r{args.radius}"
+            elif args.action == "smite_region":
+                before, after = sim.god_smite_region(
+                    args.x, args.y, args.radius, args.amount)
+                target = f"smite all in r{args.radius}"
+            elif args.action == "bless_land":
+                bonus = args.bonus if args.bonus is not None else 1.0
+                before, after = sim.god_bless_land(
+                    args.x, args.y, args.radius, bonus)
+                target = f"land +{bonus} food in r{args.radius}"
+            else:  # mass_bless
+                before, after = sim.god_mass_bless(
+                    args.resource or "food", args.amount,
+                    archetype=args.archetype,
+                )
+                target = f"all ({args.archetype or 'all'})"
         else:
             if not (0 <= args.settlement_index < len(sim.settlements)):
                 print("invalid --settlement-index", file=sys.stderr)

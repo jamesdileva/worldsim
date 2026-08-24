@@ -33,6 +33,11 @@ class World:
     # Tile improvements (roads, buildings): Improvement enum values.
     improvements: np.ndarray = field(init=False)
     _food_grid: np.ndarray | None = field(init=False, default=None)
+    # Sprint 40: god-blessed land — (y, x) -> bonus food yield added on
+    # top of the terrain profile. Persisted with world state.
+    tile_food_bonus: dict[tuple[int, int], float] = field(
+        default_factory=dict
+    )
 
     def __post_init__(self) -> None:
         key = (self.seed, self.size)

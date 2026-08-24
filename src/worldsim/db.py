@@ -432,6 +432,10 @@ def serialize_world(
             _encode_highway(p) for p in (highway_projects or [])
         ],
         "treaties": [_encode_treaty(t) for t in (treaties or [])],
+        "tile_food_bonus": {
+            f"{y},{x}": bonus
+            for (y, x), bonus in (world.tile_food_bonus or {}).items()
+        },
     }
     return json.dumps(state, sort_keys=True)
 
@@ -497,6 +501,11 @@ def deserialize_world(
         _decode_highway(obj) for obj in state.get("highway_projects", [])
     ]
     treaties = [_decode_treaty(obj) for obj in state.get("treaties", [])]
+    world.tile_food_bonus = {
+        (int(y), int(x)): float(bonus)
+        for key, bonus in state.get("tile_food_bonus", {}).items()
+        for y, x in [key.split(",")]
+    }
     return (
         world,
         settlements,

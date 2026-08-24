@@ -5,6 +5,40 @@ Decisions worth remembering are marked **[DECISION]**.
 
 ---
 
+## Session 42 — 2026-08-23 — Sprint 40: Resource Manipulation Depth
+
+**What was built**
+- `regions.py`: pure geometry helpers — `circle_tiles` (Chebyshev,
+  edge-clipped, sorted row-major), `rect_tiles` (corner-normalizing),
+  `settlements_with_spawns_in` (name-sorted deterministic order)
+- New god operations (all audited with one divine event each):
+  - `god_bless_region` / `god_strip_region` / `god_smite_region` —
+    region-targeted resource grant / zero-out / smite by spawn position
+  - `god_mass_bless` — archetype-filtered blessing across all alive
+    settlements (None = everyone)
+  - `god_bless_land` — permanent per-tile food yield overrides stored on
+    `World.tile_food_bonus` and applied in `_compute_food_income`
+- Persistence: tile_food_bonus serialized/deserialized with world state
+- CLI: bless_region / strip_region / smite_region (--force required) /
+  mass_bless (--archetype filter) / bless_land (--bonus)
+- Live smoke: mass-bless hit all 3 settlements; region wood +50;
+  blessed land lifted food income 36→54.
+- 17 new tests. Fast suite: 529 passing.
+
+### Decisions
+
+- **[DECISION] Yield bonuses applied at read time**: base food grid is
+  int-typed and cached for terrain only; bonuses live in a separate
+  dict summed into income — no dtype churn, no cache invalidation traps,
+  trivially serializable.
+- **[DECISION] Region ops target spawn positions**, not territory
+  overlap: predictable semantics ("who is standing in the blast zone")
+  and O(1) membership via the tile set.
+- **[DECISION] smite_region always requires --force** regardless of
+  amount: region-scale destruction is catastrophic by class, not by sum.
+
+---
+
 ## Session 41 — 2026-08-23 — Sprint 39: Disaster Toolkit
 
 **What was built**
