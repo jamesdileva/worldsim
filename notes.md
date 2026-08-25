@@ -5,6 +5,30 @@ Decisions worth remembering are marked **[DECISION]**.
 
 ---
 
+## Session 62b - Army manpower cap
+
+**User report**: pop 200 with army ~5000. Root cause: training gains are
+fixed (+2/raider) while upkeep is a flat 0.01 food/point/tick - armies
+equilibrate at whatever surplus food affords, not at plausible manpower
+(mature surplus ~50 food/tick -> equilibrium army 5000).
+
+**Fix**
+- MAX_SOLDIERS_PER_POP=1.0: can_train_raider/defender refuse at cap
+  (no_manpower).
+- apply_army_upkeep demobilizes pre-cap bloated armies toward
+  pop*cap at 0.5%/tick of the excess.
+- Upkeep tests given population 200 so they test upkeep/melt in
+  isolation. Fast suite: 680 passing.
+
+### Decisions
+
+- **[WHY] Manpower cap over bigger upkeep**: upkeep ties army size to
+  economy strength (interesting), but needs a sanity ceiling - soldiers
+  are people; pop 200 fielding 5000 was immersion-breaking.
+
+---
+
+
 ## Session 62 - 2026-08-24 - Founding grace, no crater-settling, guaranteed antagonist
 
 **User reports**: spawned settlements happiness-dive to 0 and die;

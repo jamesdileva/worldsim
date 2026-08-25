@@ -53,6 +53,39 @@ def test_train_raider_action():
     assert s.food_stock == pytest.approx(90.0)
 
 
+def test_training_blocked_at_manpower_cap():
+    # S61: soldiers are people - no training past MAX_SOLDIERS_PER_POP.
+    from worldsim.warfare import MAX_SOLDIERS_PER_POP
+
+    sim = Simulation(World(seed=42, size=64))
+    sim.spawn_settlements(count=1)
+    s = sim.settlements[0]
+    s.population = 10
+    s.army = 10.0 * MAX_SOLDIERS_PER_POP
+    s.food_stock = 500.0
+    s.resource_inventory["wood"] = 50.0
+    assert sim.execute_action(s, 39) is False  # TRAIN_RAIDER refused
+    assert sim.execute_action(s, 38) is False  # TRAIN_DEFENDER refused
+    assert s.army == pytest.approx(10.0 * MAX_SOLDIERS_PER_POP)
+
+
+def test_bloated_army_demobilizes_toward_cap():
+    # Pre-cap worlds could inherit absurd armies; upkeep walks them home.
+    from worldsim.warfare import DEMOBILIZATION_RATE, _manpower_cap
+
+    sim = Simulation(World(seed=42, size=64))
+    sim.spawn_settlements(count=1)
+    s = sim.settlements[0]
+    s.population = 100
+    s.army = 5000.0
+    s.food_stock = 1e9
+    apply_army_upkeep(s)
+    expected_cap = _manpower_cap(s)
+    excess_before = 5000.0 - expected_cap
+    assert s.army == pytest.approx(
+        expected_cap + excess_before * (1.0 - DEMOBILIZATION_RATE))
+
+
 def test_train_defender_adds_fort():
     sim = Simulation(World(seed=42, size=64))
     sim.spawn_settlements(count=1)
@@ -184,6 +217,7 @@ def test_no_battles_without_war():
 
 def test_army_upkeep_consumes_food():
     s = Settlement(name="A", spawn_x=1, spawn_y=1)
+    s.population = 200  # above the manpower cap; upkeep only here
     s.army = 100.0
     s.food_stock = 50.0
     apply_army_upkeep(s)
@@ -193,6 +227,7 @@ def test_army_upkeep_consumes_food():
 
 def test_starving_army_melts():
     s = Settlement(name="A", spawn_x=1, spawn_y=1)
+    s.population = 200  # above the manpower cap; melting only here
     s.army = 100.0
     s.food_stock = 0.0
     apply_army_upkeep(s)

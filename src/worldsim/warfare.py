@@ -41,6 +41,15 @@ FORTIFY_STONE_COST = 8.0
 FORTIFY_FORT_GAIN = 1
 
 ARMY_UPKEEP_FOOD_PER_POINT = 0.01   # per tick
+# Soldiers are people: training is capped at this share of population.
+# Without it, armies equilibrate at "whatever surplus food affords"
+# (pop 200 -> army 5000, S61 user report).
+MAX_SOLDIERS_PER_POP = 1.0
+DEMOBILIZATION_RATE = 0.005         # per tick above the cap
+
+
+def _manpower_cap(settlement: Settlement) -> float:
+    return settlement.population * MAX_SOLDIERS_PER_POP
 
 
 def can_train_raider(settlement: Settlement) -> tuple[bool, str]:
@@ -48,6 +57,8 @@ def can_train_raider(settlement: Settlement) -> tuple[bool, str]:
         return False, "settlement_dead"
     if settlement.food_stock < TRAIN_RAIDER_FOOD_COST:
         return False, "unaffordable_training"
+    if settlement.army >= _manpower_cap(settlement):
+        return False, "no_manpower"
     return True, ""
 
 
@@ -58,6 +69,8 @@ def can_train_defender(settlement: Settlement) -> tuple[bool, str]:
     if (settlement.food_stock < TRAIN_DEFENDER_FOOD_COST
             or inventory.get("wood", 0.0) < TRAIN_DEFENDER_WOOD_COST):
         return False, "unaffordable_training"
+    if settlement.army >= _manpower_cap(settlement):
+        return False, "no_manpower"
     return True, ""
 
 
@@ -179,7 +192,8 @@ def _impose_victors_peace(sim, victor: Settlement,
 
 
 def apply_army_upkeep(settlement: Settlement) -> None:
-    """Armies eat. Starving settlements see their armies melt."""
+    """Armies eat. Starving settlements see their armies melt; bloated
+    armies (e.g. inherited from before the manpower cap) demobilize."""
     if not settlement.is_alive or settlement.army <= 0:
         return
     upkeep = settlement.army * ARMY_UPKEEP_FOOD_PER_POINT
@@ -188,3 +202,9 @@ def apply_army_upkeep(settlement: Settlement) -> None:
     else:
         settlement.food_stock = 0.0
         settlement.army = max(0.0, settlement.army * 0.95)
+    if settlement.army > _manpower_cap(settlement):
+        excess = settlement.army - _manpower_cap(settlement)
+        settlement.army = max(
+            _manpower_cap(settlement),
+            settlement.army - excess * DEMOBILIZATION_RATE,
+        )
