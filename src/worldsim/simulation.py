@@ -74,6 +74,12 @@ CLAIM_FOOD_SURPLUS_THRESHOLD = 0.0
 # Auto-build / auto-road rules (placeholder until agents arrive in Sprint 7).
 BUILD_INTERVAL_TICKS = 8
 ROAD_INTERVAL_TICKS = 12
+# Territory roads stop expanding at this share of owned tiles; the rule
+# then sponsors inter-settlement highways (the actual city connectors).
+# Full paving looked like every tile was road (S59 user report).
+ROAD_DENSITY_CAP = 0.35
+# God spawn claims land within this range of the clicked tile.
+GOD_SPAWN_SEARCH_RADIUS = 8
 # Build priority evaluated top-down; first type with a valid affordable site
 # is queued.
 BUILD_PRIORITY = [
@@ -657,6 +663,12 @@ class Simulation:
             else {(settlement.spawn_y, settlement.spawn_x)}
         )
         owned = self._owned_mask(settlement)
+        # Density cap: a city is roads around buildings and a spine out,
+        # not pavement everywhere. Saturated -> sponsor highways.
+        owned_count = int(owned.sum())
+        if owned_count and len(roads) >= owned_count * ROAD_DENSITY_CAP:
+            maybe_start_highways(self, settlement)
+            return
         size = self.world.size
         for ay, ax in sorted(anchor):
             for dy, dx in ((0, 1), (1, 0), (0, -1), (-1, 0)):
@@ -900,11 +912,16 @@ class Simulation:
         self, x: int, y: int, name: str | None = None
     ) -> tuple[dict, dict]:
         """Found a new settlement near (x, y). Deterministic name when not
-        given; registers the standard rule agent."""
-        location = self._find_free_tile_near(x, y)
+        given; registers the standard rule agent. God spawning may claim
+        already-owned land — the spawn tile transfers to the newcomer."""
+        location = self._find_free_tile_near(
+            x, y, allow_claimed=True, max_radius=GOD_SPAWN_SEARCH_RADIUS)
         if location is None:
-            raise ValueError(f"no free tile near ({x}, {y})")
+            raise ValueError(
+                f"no land within {GOD_SPAWN_SEARCH_RADIUS} tiles of "
+                f"({x}, {y}) — aim closer to shore")
         row, col = location
+        previous_owner = int(self.world.ownership[row, col])
         settlement_name = name or generate_name(
             self.world.seed, len(self.settlements))
         settlement = Settlement(
@@ -914,6 +931,11 @@ class Simulation:
             created_at_tick=self.tick,
         )
         self._register_settlement(settlement)
+        # Godlike claim: the exact spawn tile becomes the new city's,
+        # even if another civilization owned it.
+        new_index = len(self.settlements) - 1
+        self.world.ownership[row, col] = new_index
+        self._invalidate_cache()
         before = {"settlements": len(self.settlements) - 1}
         after = {
             "settlements": len(self.settlements),
@@ -921,6 +943,13 @@ class Simulation:
             "x": col,
             "y": row,
         }
+        if previous_owner != UNOWNED and previous_owner != new_index:
+            displaced = (
+                self.settlements[previous_owner].name
+                if 0 <= previous_owner < len(self.settlements)
+                else str(previous_owner)
+            )
+            after["claimed_from"] = displaced
         self._divine(
             f"spawned settlement {settlement.name} at ({col}, {row})")
         return before, after
@@ -1470,10 +1499,19 @@ class Simulation:
         self.ruins.append(ruin)
         return ruin
 
-    def _find_free_tile_near(self, cx: int, cy: int) -> tuple[int, int] | None:
-        """Nearest unowned land tile to (cx, cy) by expanding rings."""
+    def _find_free_tile_near(
+        self,
+        cx: int,
+        cy: int,
+        allow_claimed: bool = False,
+        max_radius: int | None = None,
+    ) -> tuple[int, int] | None:
+        """Nearest land tile to (cx, cy) by expanding rings. By default
+        only unowned tiles qualify; god spawning may claim owned land
+        within a bounded radius so deep-ocean clicks fail loudly."""
         size = self.world.size
-        for r in range(0, size):
+        limit = max_radius if max_radius is not None else size
+        for r in range(0, min(limit, size)):
             for dy in range(-r, r + 1):
                 for dx in range(-r, r + 1):
                     if max(abs(dy), abs(dx)) != r:
@@ -1481,10 +1519,12 @@ class Simulation:
                     y, x = cy + dy, cx + dx
                     if not (0 <= y < size and 0 <= x < size):
                         continue
-                    if (
+                    if TerrainType(
+                        self.world.terrain[y, x]
+                    ) == TerrainType.WATER:
+                        continue
+                    if allow_claimed or (
                         self.world.ownership[y, x] == UNOWNED
-                        and TerrainType(self.world.terrain[y, x])
-                        != TerrainType.WATER
                     ):
                         return y, x
         return None

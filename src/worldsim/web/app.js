@@ -115,6 +115,29 @@ function drawMap(data) {
       ctx.textAlign = "center";
       ctx.fillText(s.name.slice(0, 8), s.x * cell, (s.y - 1.2) * cell);
     }
+    // War overlay: red dashed lines between warring civilizations.
+    if ((data.wars || []).length) {
+      ctx.save();
+      ctx.strokeStyle = "#ff3b3b";
+      ctx.lineWidth = Math.max(1.2, cell * 0.22);
+      ctx.setLineDash([cell * 0.9, cell * 0.7]);
+      for (const w of data.wars) {
+        ctx.beginPath();
+        ctx.moveTo((w.a.x + 0.5) * cell, (w.a.y + 0.5) * cell);
+        ctx.lineTo((w.b.x + 0.5) * cell, (w.b.y + 0.5) * cell);
+        ctx.stroke();
+      }
+      // Crossed swords at each war's midpoint.
+      ctx.setLineDash([]);
+      ctx.font = `${Math.max(9, cell * 2)}px monospace`;
+      ctx.fillStyle = "#ff3b3b";
+      for (const w of data.wars) {
+        const mx = (w.a.x + w.b.x) / 2 + 0.5;
+        const my = (w.a.y + w.b.y) / 2 + 0.5;
+        ctx.fillText("⚔", mx * cell, my * cell);
+      }
+      ctx.restore();
+    }
   } catch (e) {
     showPageError("map render", e);
   }

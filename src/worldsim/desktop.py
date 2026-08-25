@@ -17,6 +17,8 @@ def launch_desktop(
     world_id: str | None = None,
     width: int = 1280,
     height: int = 800,
+    llm: bool = False,
+    llm_model: str | None = None,
 ) -> int:
     """Start the API server + open the desktop window. Blocks until the
     window closes."""
@@ -36,6 +38,12 @@ def launch_desktop(
 
     store = WorldStore(db_path) if db_path else WorldStore()
     session = WorldSession(store=store)
+    if llm:
+        if session.enable_llm(model=llm_model):
+            print(f"LLM advisor enabled"
+                  f"{f' (model: {llm_model})' if llm_model else ''}")
+        else:
+            print("LLM deps unavailable — running rules-only")
     if world_id:
         try:
             session.load(world_id)
@@ -80,10 +88,15 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--port", type=int, default=8600)
     parser.add_argument("--db", default=str(DEFAULT_DB_PATH))
     parser.add_argument("--world-id", default=None)
+    parser.add_argument("--llm", action="store_true",
+                        help="attach a background Ollama advisor")
+    parser.add_argument("--llm-model", default=None,
+                        help="Ollama model override "
+                             "(try llama3.2:3b for speed)")
     args = parser.parse_args(argv)
     return launch_desktop(
         host=args.host, port=args.port, db_path=args.db,
-        world_id=args.world_id)
+        world_id=args.world_id, llm=args.llm, llm_model=args.llm_model)
 
 
 if __name__ == "__main__":

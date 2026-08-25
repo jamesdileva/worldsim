@@ -268,6 +268,15 @@ def build_parser() -> argparse.ArgumentParser:
     serve.add_argument(
         "--db", default=str(DEFAULT_DB_PATH), help="SQLite database path"
     )
+    serve.add_argument(
+        "--llm", action="store_true",
+        help="attach a background Ollama advisor to every settlement",
+    )
+    serve.add_argument(
+        "--llm-model", default=None,
+        help="Ollama model override (default: llm_config.json or "
+             "llama3.1:8b; try llama3.2:3b for speed)",
+    )
 
     desktop = sub.add_parser(
         "desktop",
@@ -279,6 +288,15 @@ def build_parser() -> argparse.ArgumentParser:
     desktop.add_argument("--port", type=int, default=8600)
     desktop.add_argument(
         "--db", default=str(DEFAULT_DB_PATH), help="SQLite database path"
+    )
+    desktop.add_argument(
+        "--llm", action="store_true",
+        help="attach a background Ollama advisor to every settlement",
+    )
+    desktop.add_argument(
+        "--llm-model", default=None,
+        help="Ollama model override (default: llm_config.json or "
+             "llama3.1:8b; try llama3.2:3b for speed)",
     )
 
     chron = sub.add_parser(
@@ -1503,6 +1521,15 @@ def cmd_serve(args: argparse.Namespace) -> int:
     store = WorldStore(args.db)
     try:
         session = WorldSession(store=store)
+        if getattr(args, "llm", False):
+            model = getattr(args, "llm_model", None)
+            if session.enable_llm(model=model):
+                print(f"LLM advisor enabled"
+                      f"{f' (model: {model})' if model else ''} — "
+                      f"settlements reason in the background")
+            else:
+                print("LLM deps unavailable — running rules-only",
+                      file=sys.stderr)
         if args.world_id:
             try:
                 session.load(args.world_id)
@@ -2380,7 +2407,8 @@ def main(argv: list[str] | None = None) -> int:
         "desktop": lambda a: __import__(
             "worldsim.desktop", fromlist=["launch_desktop"]
         ).launch_desktop(
-            host=a.host, port=a.port, db_path=a.db, world_id=a.world_id
+            host=a.host, port=a.port, db_path=a.db, world_id=a.world_id,
+            llm=a.llm, llm_model=a.llm_model,
         ),
         "replay": cmd_replay,
         "compare": cmd_compare_worlds,

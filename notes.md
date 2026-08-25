@@ -5,6 +5,45 @@ Decisions worth remembering are marked **[DECISION]**.
 
 ---
 
+## Session 60 - 2026-08-24 - Roads-as-cities, god claims, war overlay, optional live LLM
+
+**User questions investigated and answered**
+- Roads sprawl was real physics: the auto-road rule paved EVERY owned
+  tile before sponsoring highways. Now capped at ROAD_DENSITY_CAP=0.35
+  of owned tiles; saturation flows into highway sponsorship sooner.
+- Wars exist (raids -> declarations -> 100-tick battles -> sieges) but
+  peaceful worlds talk themselves out: era-2 cities sign non-aggression
+  treaties constantly, which block raids even between hostile pairs.
+- Ollama advice never runs in normal sims (rule agents only).
+- Identical pops after nukes re-confirmed as food-cap equilibrium.
+- God spawn failed because _find_free_tile_near required UNOWNED land;
+  mature worlds own everything.
+
+**What was built**
+- Road density cap + earlier highway hand-off (sim physics change,
+  suite green: 670 passing).
+- god_spawn_settlement claims owned land within GOD_SPAWN_SEARCH_RADIUS
+  (=8) of the click; reports claimed_from; deep-water clicks fail loudly.
+- /api/grid now includes wars[] with both civs' positions; canvas draws
+  red dashed war lines + swords markers; legend updated.
+- serve/desktop --llm [--llm-model]: WorldSession.enable_llm attaches a
+  BackgroundAdvisor (interval_ticks=2000 + event triggers = rare);
+  LLMDrivenAgent swaps into every settlement slot on load/new. Falls
+  back to rules-only silently when deps missing.
+- Exe rebuilt; HTTP smoke vs live exe incl. spawn claiming from Brazemi.
+
+### Decisions
+
+- **[WHY] Cap not spine**: density cap preserves organic growth order;
+  a hand-routed spine would need pathfinding the rule engine lacks.
+- **[WHY] Rare LLM by default (2000-tick interval)**: local inference is
+  slow and one call at a time per world; big events still trigger.
+- **[DECISION] God spawn transfers the tile**: spawning inside another
+  civilization steals that tile - godlike, visible via claimed_from.
+
+---
+
+
 ## Session 59 - 2026-08-24 - Desktop UX round: map fidelity + god-action fixes
 
 **User reports after playing the packaged exe**: no roads/buildings/

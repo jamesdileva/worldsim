@@ -56,10 +56,50 @@ class WorldSession:
     restore_label: str | None = None
     running: bool = False
     run_interval_ticks: int = 100
+    # Optional live LLM advising (S59): when set, every settlement's
+    # agent slot swaps to an LLMDrivenAgent on load/world-creation.
+    llm_client: object | None = None
+    llm_advisor: object | None = None
+    reasoning_config: object | None = None
     _thread: threading.Thread | None = field(default=None, init=False)
     _stop = threading.Event()
 
     # -- lifecycle -------------------------------------------------------
+
+    def enable_llm(self, model: str | None = None) -> bool:
+        """Attach a background Ollama advisor. Returns False (and stays
+        rules-only) if the client deps are unavailable."""
+        try:
+            from .llm import LLMConfig, OllamaClient
+            from .reasoning import BackgroundAdvisor, ReasoningConfig
+        except ImportError:
+            return False
+        config = LLMConfig(model=model) if model else LLMConfig()
+        self.llm_client = OllamaClient(config=config)
+        # Rare by design: interval advice plus big-event triggers only.
+        self.reasoning_config = ReasoningConfig(
+            interval_ticks=2000, on_events=True)
+        self.llm_advisor = BackgroundAdvisor(self.llm_client)
+        return True
+
+    def attach_llm_agents(self) -> int:
+        """Swap LLMDrivenAgent into every living settlement's slot."""
+        if self.sim is None or self.llm_client is None:
+            return 0
+        from .llm_agent import attach_llm_agent
+
+        count = 0
+        for s in list(self.sim.settlements):
+            if not s.is_alive:
+                continue
+            if attach_llm_agent(
+                self.sim, s.id,
+                client=self.llm_client,
+                advisor=self.llm_advisor,
+                config=self.reasoning_config,
+            ) is not None:
+                count += 1
+        return count
 
     def load(self, world_id: str) -> None:
         from .cli import _load_sim_from_store
@@ -67,6 +107,8 @@ class WorldSession:
         self.sim = _load_sim_from_store(self.store, world_id)
         self.world_id = world_id
         self.restore_json = None
+        if self.llm_client is not None:
+            self.attach_llm_agents()
 
     def save(self, world_id: str | None = None) -> str:
         if self.sim is None:
@@ -316,6 +358,27 @@ def create_app(session: WorldSession) -> FastAPI:
         # Real buildings are codes 1..4; the grid also marks ruins with
         # -1, which must not render as buildings.
         mask = (world.improvements >= Improvement.FARM.value)
+        wars: list[dict] = []
+        seen_pairs: set[frozenset] = set()
+        for s in sim.settlements:
+            if not s.is_alive:
+                continue
+            for key in sim.diplomacy.wars_of(s.id):
+                if key in seen_pairs:
+                    continue
+                seen_pairs.add(key)
+                other_id = next(iter(key - {s.id}), None)
+                other = (
+                    sim.settlement_by_id(other_id)
+                    if other_id else None
+                )
+                if other is None or not other.is_alive:
+                    continue
+                wars.append({
+                    "a": {"name": s.name, "x": s.spawn_x, "y": s.spawn_y},
+                    "b": {"name": other.name,
+                          "x": other.spawn_x, "y": other.spawn_y},
+                })
         return {
             "size": world.size,
             "tick": tick,
@@ -338,6 +401,7 @@ def create_app(session: WorldSession) -> FastAPI:
                 for z in getattr(sim, "contamination_zones", [])
                 if z.is_active(tick)
             ],
+            "wars": wars,
             "settlements": settlements,
         }
 
@@ -455,6 +519,8 @@ def create_app(session: WorldSession) -> FastAPI:
         session.sim = Simulation(World(seed=request.seed, size=size))
         spawned = session.sim.spawn_settlements(count=count)
         session.world_id = None
+        if session.llm_client is not None:
+            session.attach_llm_agents()
         return {
             "created": True,
             "seed": request.seed,
