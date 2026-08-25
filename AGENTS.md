@@ -868,6 +868,16 @@ Agents replace auto-rules; the frozen RL contract is born
 - **[WHY] Hardliner refusal over alliance decay alone**: the
   antagonist must stay unallied or war stays structurally impossible.
 
+### Session 63b - Advice capture (this session)
+- User asked whether LLM advice reaches the timeline - it did not;
+  consumed advice was invisible outside jsonl side channels.
+- _queue_intents now logs an advice event per consumed counsel:
+  priorities digest + truncated rationale + N accepted (named) /
+  M dropped (reasons). New counsel category in canvas + chart palettes.
+- **[WHY] Log at consumption not submission**: consumption is when
+  advice shaped the world; the accepted/dropped split shows what it
+  achieved. Fast suite: 687 passing. Exe rebuilt.
+
 ### Session 62b - Army manpower cap (this session)
 - User report: pop 200 with army ~5000. Fixed armies equilibrated
   at food-surplus, not manpower: MAX_SOLDIERS_PER_POP=1.0 training
