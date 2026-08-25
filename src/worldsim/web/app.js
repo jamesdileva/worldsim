@@ -220,6 +220,7 @@ const CATEGORY_COLORS = {
   diplomacy: "#7fb3ff",
   trade: "#7fd98a",
   divine: "#ffd166",
+  counsel: "#ffa8d8",
   disasters: "#c792ea",
   civilization: "#64d8cb",
   other: "#9aa0a6",

@@ -142,12 +142,44 @@ class LLMDrivenAgent(Agent):
                        result: AdviceResult) -> None:
         candidates = map_advice_to_actions(
             result.advice, telemetry=self.telemetry)
+        queued: list[str] = []
+        dropped: list[str] = []
         for action in candidates:
             ok, reason = validate_action(sim, settlement, action)
             if ok:
                 self._pending.append(action)
+                queued.append(action.name.lower())
             else:
                 self.telemetry.record_drop(reason)
+                dropped.append(reason)
+        # S63: advice is now visible in the world timeline — otherwise
+        # the advisor's work was invisible outside jsonl side channels.
+        try:
+            sim.log_event(
+                "advice",
+                [settlement.id],
+                f"{settlement.name} weighed counsel: "
+                f"{self._advice_digest(result)} | intents: "
+                f"{len(queued)} accepted"
+                + (f" ({', '.join(queued)})" if queued else "")
+                + (f", {len(dropped)} dropped" if dropped else ""),
+            )
+        except Exception:  # noqa: BLE001 - logging must never break sims
+            pass
+
+    @staticmethod
+    def _advice_digest(result: AdviceResult) -> str:
+        advice = result.advice
+        if advice is None:
+            return "empty advice"
+        parts = [p for p in advice.priorities if p]
+        digest = "; ".join(parts[:3]) if parts else "no priorities"
+        if advice.rationale:
+            rationale = advice.rationale.strip()
+            if len(rationale) > 120:
+                rationale = rationale[:117] + "..."
+            digest += f" — {rationale}"
+        return digest
 
     def _call_advisor(self, summary: str,
                       name: str) -> AdviceResult | None:

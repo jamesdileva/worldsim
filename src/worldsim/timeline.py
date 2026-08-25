@@ -31,6 +31,7 @@ EVENT_CATEGORIES: dict[str, str] = {
     "collapse": "civilization",
     "trade_route": "trade",
     "divine": "divine",
+    "advice": "counsel",
     "disaster": "disasters",
     "drought": "disasters",
     "fire": "disasters",

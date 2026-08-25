@@ -5,6 +5,33 @@ Decisions worth remembering are marked **[DECISION]**.
 
 ---
 
+## Session 63b - Advice capture in the timeline
+
+**User question**: does LLM advice show in the timeline? It did not -
+consumed advice only bumped invisible telemetry; dropped intents
+vanished silently. The advisor was unobservable in play.
+
+**Fix**
+- LLMDrivenAgent._queue_intents now logs an advice event on every
+  consumed counsel: priorities digest + truncated rationale + intent
+  outcome (N accepted with names, M dropped with reasons).
+- New timeline category counsel (EVENT_CATEGORIES, canvas colors,
+  server chart palette) - pink badge.
+- Never-raise discipline preserved: logging wrapped in try/except;
+  empty-advice digests handled.
+
+Tests: test_advice_timeline.py (fake advisor -> event lands with
+digest + intents). Fast suite: 687 passing. Exe rebuilt + smoke.
+
+### Decisions
+
+- **[WHY] Log at consumption time, not submission**: submission is
+  scheduling noise; consumption is when advice actually shaped the
+  world - and the accepted/dropped split shows WHAT it achieved.
+
+---
+
+
 ## Session 63 - 2026-08-25 - War unblocked, merged timeline, LLM by default
 
 **User playtest (seed 3, year 207)** drove this round: no wars ever,

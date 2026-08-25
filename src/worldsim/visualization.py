@@ -229,6 +229,7 @@ CATEGORY_COLORS = {
     "civilization": "#228b22",
     "trade": "#b8860b",
     "divine": "#8a2be2",
+    "counsel": "#c71585",
     "disasters": "#ff8c00",
     "other": "#666666",
 }
