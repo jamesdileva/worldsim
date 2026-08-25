@@ -878,6 +878,18 @@ Agents replace auto-rules; the frozen RL contract is born
   advice shaped the world; the accepted/dropped split shows what it
   achieved. Fast suite: 687 passing. Exe rebuilt.
 
+### Session 63c - Watchability round (this session)
+- User playtest exposed: run loop unpaced (wars lasted wall-clock
+  seconds), timeline feed frozen on first-40 events forever
+  (head-truncation bug), god colonies owning ONE tile inside foreign
+  land (starved instantly), advice failures invisible, roads free.
+- Fixes: start_run paced at DEFAULT_RUN_TPS=120; build_timeline(tail)
+  for live feeds; colonies claim radius-2 territory by eminent domain;
+  failed advice logs visible events; road_cost escalates (1+roads/25).
+- **[WHY] Pace the loop, don\x27t shorten wars**: war cadences are tick-
+  based sim semantics; presentation speed was the actual bug.
+- Fast suite: 691 passing. Exe rebuilt + pacing verified via HTTP.
+
 ### Session 62b - Army manpower cap (this session)
 - User report: pop 200 with army ~5000. Fixed armies equilibrated
   at food-surplus, not manpower: MAX_SOLDIERS_PER_POP=1.0 training
