@@ -146,10 +146,16 @@ def test_trade_tick_moves_scaled_amounts():
 def test_trade_tick_clamps_to_donor_stock():
     sim = _sim(n=2)
     a, b = sim.settlements
+    # S63 founder wealth varies; pin identical baselines EXCEPT wood so
+    # wood owns the largest valuation gap and flows toward the receiver.
+    for s in (a, b):
+        s.resource_inventory.clear()
+        s.resource_inventory.update({"wood": 0.0, "stone": 20.0,
+                                     "metal": 5.0})
+        s.food_stock = 200.0
     route = sim.establish_route(a, b)
     assert route is not None
-    a.resource_inventory.update({"wood": 0.6})
-    b.resource_inventory.update({"wood": 0.0})
+    a.resource_inventory["wood"] = 0.6
     sim._trade_tick(route)
     assert b.resource_inventory["wood"] == pytest.approx(
         0.6 - a.resource_inventory["wood"])

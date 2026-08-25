@@ -5,6 +5,35 @@ Decisions worth remembering are marked **[DECISION]**.
 
 ---
 
+## Session 63d - Failure throttling + founder wealth variance
+
+**User reports**: timeline flooded by Ollama failure events (10054
+connection resets); asked if a smaller model would help; pops in seed 3
+still converge without disasters.
+
+**Fixes**
+- Counsel failure logging throttled: one event when a failure streak
+  starts, then at most one per 2500 ticks until advice works again.
+- FOUNDER WEALTH VARIANCE: spawn_settlements scales starting food and
+  resources by 0.6x-1.5x (seeded, deterministic). Identical starts meant
+  identical equilibria with only disasters breaking symmetry; early
+  wealth compounds into era/tech/trade leads. One market clamp test
+  re-pinned (explicit wood-only asymmetry).
+- Advisor queue clarified: submit() REJECTS while busy (no pileup);
+  failures are per-attempt resets, now quiet unless persistent.
+
+Fast suite: 692 passing. Exe rebuilt.
+
+### Model guidance
+
+gemma2:2b is already near the fast end; llama3.2:1b is faster still via
+data/world_sim/llm_config.json. 10054 resets usually mean Ollama itself
+is reloading/unloading the model between calls (keep_alive), not our
+client - check ollama ps / set OLLAMA_KEEP_ALIVE longer.
+
+---
+
+
 ## Session 63c - Watchability round: pacing, timeline tail, viable colonies
 
 **User playtest**: wars ended in wall-clock seconds; timeline froze

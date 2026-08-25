@@ -384,6 +384,19 @@ class Simulation:
                 spawn_y=row,
                 created_at_tick=self.tick,
             )
+            # S63: founder wealth varies by seed - some civilizations
+            # start rich, others poor. Identical starts meant identical
+            # equilibrium pops with nothing but disasters to break the
+            # symmetry; early wealth compounds into era/tech/trade leads.
+            wealth_rng = random.Random(
+                (self.world.seed ^ 0xF00D) + len(self.settlements) * 7919
+            )
+            multiplier = 0.6 + wealth_rng.random() * 0.9  # 0.6x .. 1.5x
+            settlement.food_stock = round(
+                settlement.food_stock * multiplier, 1)
+            for resource in settlement.resource_inventory:
+                settlement.resource_inventory[resource] = round(
+                    settlement.resource_inventory[resource] * multiplier, 1)
             self._register_settlement(settlement)
             spawned.append(settlement)
         # S61/S62: guarantee a real antagonist. Natural military

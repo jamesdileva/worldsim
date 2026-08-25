@@ -28,6 +28,8 @@ from .settlement import Settlement
 from .summaries import TIER_TINY, summarize_settlement
 
 DEFAULT_ADVICE_INTERVAL_TICKS = 24
+# While the advisor keeps failing, re-log at most this often.
+COUNSEL_FAILURE_LOG_INTERVAL = 2500
 
 
 class LLMDrivenAgent(Agent):
@@ -63,6 +65,12 @@ class LLMDrivenAgent(Agent):
         self._pending: deque[Action] = deque()
         self._last_advice_tick: int | None = None
         self._last_summary: str = ""
+        # Counsel-failure log throttle (S63): one event when a failure
+        # streak starts, then at most one per COUNSEL_FAILURE_LOG_INTERVAL
+        # ticks until advice works again - otherwise a downed Ollama
+        # floods the timeline.
+        self._counsel_failing = False
+        self._last_failure_log_tick: int | None = None
         self.last_action: int = int(Action.IDLE)
 
     @property
@@ -85,19 +93,29 @@ class LLMDrivenAgent(Agent):
             result = self.advisor.poll(settlement.id)
             if result is not None and result.ok and result.advice is not None:
                 self._last_advice_tick = sim.tick
+                self._counsel_failing = False
                 self._queue_intents(sim, settlement, result)
             elif result is not None and not result.ok:
-                # S63: failed advice must be visible too - otherwise a
-                # downed or busy Ollama looks identical to "no advice".
-                try:
-                    sim.log_event(
-                        "advice",
-                        [settlement.id],
-                        f"{settlement.name} could not reach its advisor: "
-                        f"{result.error or 'unknown error'}",
-                    )
-                except Exception:  # noqa: BLE001
-                    pass
+                # Failed advice must be visible, but a downed Ollama must
+                # not flood the feed: log streak start + periodic reminder.
+                due = (
+                    not self._counsel_failing
+                    or self._last_failure_log_tick is None
+                    or sim.tick - self._last_failure_log_tick
+                    >= COUNSEL_FAILURE_LOG_INTERVAL
+                )
+                if due:
+                    try:
+                        sim.log_event(
+                            "advice",
+                            [settlement.id],
+                            f"{settlement.name} could not reach its "
+                            f"advisor: {result.error or 'unknown error'}",
+                        )
+                    except Exception:  # noqa: BLE001
+                        pass
+                    self._counsel_failing = True
+                    self._last_failure_log_tick = sim.tick
             due, _why = should_reason(
                 self.config, sim, settlement, self._last_advice_tick)
             if due and not self.advisor.busy:

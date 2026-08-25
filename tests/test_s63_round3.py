@@ -77,7 +77,9 @@ def test_failed_advice_is_visible_in_event_log():
 
         def poll(self, key):
             result = self._result
-            self._result = None
+            # Simulate a persistently failing advisor: every poll gets a
+            # fresh failure, like a downed Ollama answering each attempt.
+            self._result = AdviceResult(ok=False, error="connection refused")
             return result
 
         def submit(self, key, summary, name):
@@ -92,8 +94,42 @@ def test_failed_advice_is_visible_in_event_log():
         advisor=FailingAdvisor(),
         config=ReasoningConfig(interval_ticks=None),
     )
-    agent.observe(sim, s)
-    advice_events = [e for e in sim.event_log if e.type == "advice"]
-    assert len(advice_events) == 1
-    assert "could not reach" in advice_events[0].description
-    assert "connection refused" in advice_events[0].description
+
+    class TickShim:
+        """Read-only sim tick is fine everywhere else; feed a fake one."""
+
+        def __init__(self, sim, tick):
+            self._sim = sim
+            self._tick = tick
+
+        @property
+        def tick(self):
+            return self._tick
+
+        def __getattr__(self, name):
+            return getattr(self._sim, name)
+
+    for tick in range(1, 6001):
+        agent.observe(TickShim(sim, tick), s)
+    failures = [e for e in sim.event_log if e.type == "advice"]
+    assert failures, "first failure should be visible"
+    assert all("could not reach" in e.description for e in failures)
+    # Throttled: 6000 consecutive failures must not flood the feed.
+    assert len(failures) <= 4
+
+
+def test_founder_wealth_varies_by_seed():
+    sims = [Simulation(World(seed=s, size=48)) for s in range(8)]
+    starting = set()
+    for sim in sims:
+        sim.spawn_settlements(count=3)
+        for s in sim.settlements:
+            starting.add(s.food_stock)
+    assert len(starting) > 4, (
+        "founder wealth should vary across seeds/settlements")
+    # Deterministic: same seed -> identical wealth.
+    a = Simulation(World(seed=11, size=48))
+    b = Simulation(World(seed=11, size=48))
+    pops_a = [(s.name, s.food_stock) for s in a.spawn_settlements(count=2)]
+    pops_b = [(s.name, s.food_stock) for s in b.spawn_settlements(count=2)]
+    assert pops_a == pops_b
