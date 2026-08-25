@@ -833,6 +833,26 @@ Agents replace auto-rules; the frozen RL contract is born
 - **[NOTE] Curves come from in-RAM epoch history**; reloading a saved
   world starts epochs fresh (documented S45 limitation).
 
+### Session 60 - Roads/god-spawn/war-overlay/LLM round (this session)
+- Road physics changed: territory roads capped at
+  ROAD_DENSITY_CAP=0.35 of owned tiles; saturation hands off to
+  highway sponsorship sooner (cities connect earlier, no pavement).
+- god_spawn_settlement claims owned land within radius 8 of the
+  click (was UNOWNED-only -> always failed in mature worlds);
+  reports claimed_from; deep-water clicks fail loudly.
+- /api/grid wars[] + canvas overlay: dashed red war lines and
+  swords markers between warring civilizations.
+- serve/desktop --llm [--llm-model]: BackgroundAdvisor with
+  2000-tick interval + event triggers; LLMDrivenAgent in every slot
+  on load/new; silent rules-only fallback.
+- Wars answered: fully implemented but peaceful worlds treaty
+  themselves out of conflict (non-aggression blocks hostile raids).
+- Fast suite: 670 passing. Exe rebuilt + smoke vs live exe.
+- **[WHY] Cap not spine**: organic growth order preserved; a routed
+  spine needs pathfinding the rule engine lacks.
+- **[WHY] Rare LLM default**: local inference is slow, one in-flight
+  call per world; big events still trigger advice.
+
 ### Session 59 - Desktop UX round (this session)
 - User reports from packaged-exe play: terraform/spawn dead,
   no roads/buildings visible, map frozen during run, identical
