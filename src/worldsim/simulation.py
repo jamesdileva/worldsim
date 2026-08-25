@@ -82,6 +82,9 @@ ROAD_DENSITY_CAP = 0.35
 GOD_SPAWN_SEARCH_RADIUS = 8
 # God-founded colonies arrive with real settlers (natural spawns are 10).
 GOD_SPAWN_POPULATION = 30
+# ...and claim a starter territory by eminent domain, so they earn
+# income even when founded inside another civilization's borders.
+GOD_SPAWN_TERRITORY_RADIUS = 2
 # Build priority evaluated top-down; first type with a valid affordable site
 # is queued.
 BUILD_PRIORITY = [
@@ -629,12 +632,19 @@ class Simulation:
             return False
         if TerrainType(self.world.terrain[y, x]) == TerrainType.WATER:
             return False
-        if not self.can_afford(settlement, 0, ROAD_COST_STONE):
+        if not self.can_afford(settlement, 0, self.road_cost(settlement)):
             return False
-        self._pay(settlement, 0, ROAD_COST_STONE)
+        self._pay(settlement, 0, self.road_cost(settlement))
         self.world.improvements[y, x] = Improvement.ROAD.value
         self._invalidate_cache()
         return True
+
+    def road_cost(self, settlement: Settlement) -> float:
+        """Escalating marginal road cost: the first tiles are cheap, a
+        sprawling network costs real stone. Without this, mature
+        stockpiles made roads effectively free (S63 user report)."""
+        roads = len(self.roads_of(settlement))
+        return ROAD_COST_STONE * (1.0 + roads / 25.0)
 
     def roads_of(self, settlement: Settlement) -> set[tuple[int, int]]:
         idx = self.settlements.index(settlement)
@@ -1001,10 +1011,27 @@ class Simulation:
         # pop-10 outposts were getting absorbed by neighbors instantly.
         settlement.population = GOD_SPAWN_POPULATION
         self._register_settlement(settlement)
-        # Godlike claim: the exact spawn tile becomes the new city's,
-        # even if another civilization owned it.
+        # Godlike claim: the spawn tile plus a radius-2 starter territory
+        # transfer to the newcomer even inside foreign land. Without this
+        # a colony inside a mature civilization owned ONE tile, earned
+        # nothing, and starved within moments (S63 user report).
         new_index = len(self.settlements) - 1
-        self.world.ownership[row, col] = new_index
+        claimed_from: int | None = None
+        size = self.world.size
+        for dy in range(-GOD_SPAWN_TERRITORY_RADIUS,
+                        GOD_SPAWN_TERRITORY_RADIUS + 1):
+            for dx in range(-GOD_SPAWN_TERRITORY_RADIUS,
+                            GOD_SPAWN_TERRITORY_RADIUS + 1):
+                ty, tx = row + dy, col + dx
+                if not (0 <= ty < size and 0 <= tx < size):
+                    continue
+                if self.world.terrain[ty, tx] == 0:  # water stays water
+                    continue
+                previous = int(self.world.ownership[ty, tx])
+                if previous != new_index:
+                    self.world.ownership[ty, tx] = new_index
+                    if previous != UNOWNED:
+                        claimed_from = previous
         self._invalidate_cache()
         before = {"settlements": len(self.settlements) - 1}
         after = {
@@ -1020,6 +1047,8 @@ class Simulation:
                 else str(previous_owner)
             )
             after["claimed_from"] = displaced
+        if claimed_from is not None:
+            after["territory_claimed_radius"] = GOD_SPAWN_TERRITORY_RADIUS
         self._divine(
             f"spawned settlement {settlement.name} at ({col}, {row})")
         return before, after

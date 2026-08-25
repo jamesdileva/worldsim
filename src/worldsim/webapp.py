@@ -36,6 +36,11 @@ def _web_dir() -> Path:
     return Path(__file__).parent / "web"
 
 
+# Run-loop pacing: unpaced, the sim executed hundreds of ticks per
+# second and wars "lasted seconds" of wall time (S63 user report).
+DEFAULT_RUN_TPS = 120.0
+
+
 def _chart_bytes(render) -> bytes:
     """Render a chart straight into memory (no temp files)."""
     import io
@@ -198,7 +203,8 @@ class WorldSession:
             self.sim.step()
         return self.status()
 
-    def start_run(self, interval_ticks: int = 500) -> dict:
+    def start_run(self, interval_ticks: int = 500,
+                  ticks_per_second: float = DEFAULT_RUN_TPS) -> dict:
         if self.sim is None:
             raise RuntimeError("no world loaded")
         if self.running:
@@ -207,13 +213,17 @@ class WorldSession:
         self._stop.clear()
         self.run_interval_ticks = max(1, interval_ticks)
 
+        frame_time = 1.0 / max(1.0, ticks_per_second)
+
         def loop():
             while not self._stop.is_set() and self.running:
+                started = time.perf_counter()
                 self.sim.step()
-                if self.sim.tick % self.run_interval_ticks == 0 \
-                        and self._stop.wait(0):
+                # Pace the simulation so years don't flash by: wars,
+                # advice cycles, and growth become watchable.
+                delay = frame_time - (time.perf_counter() - started)
+                if delay > 0 and self._stop.wait(delay):
                     break
-                time.sleep(0)  # yield; speed controlled by caller pacing
 
         self._thread = threading.Thread(target=loop, daemon=True,
                                         name="worldsim-run")
@@ -285,6 +295,7 @@ class StepRequest(BaseModel):
 
 class RunRequest(BaseModel):
     interval_ticks: int = 500
+    ticks_per_second: float | None = None
 
 
 class GodRequest(BaseModel):
@@ -476,8 +487,11 @@ def create_app(session: WorldSession) -> FastAPI:
 
         _require_world(session)
         categories = {category} if category else None
+        # Live feed: the NEWEST events, or the view freezes once the log
+        # outgrows the limit (S63 user report).
         events = build_timeline(session.sim, categories=categories,
-                                limit=max(0, min(limit, 1000)))
+                                limit=max(0, min(limit, 1000)),
+                                tail=True)
         return {
             "count": len(events),
             "rendered": [
@@ -495,7 +509,9 @@ def create_app(session: WorldSession) -> FastAPI:
     @app.post("/api/run")
     def api_run(request: RunRequest):
         _require_world(session)
-        return session.start_run(request.interval_ticks)
+        tps = request.ticks_per_second or DEFAULT_RUN_TPS
+        return session.start_run(request.interval_ticks,
+                                 ticks_per_second=tps)
 
     @app.post("/api/pause")
     def api_pause():

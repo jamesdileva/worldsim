@@ -51,11 +51,13 @@ def build_timeline(
     since_tick: int | None = None,
     until_tick: int | None = None,
     limit: int = 200,
+    tail: bool = False,
 ) -> list:
     """Chronologically filtered events.
 
-    All filters AND together; limit keeps the OLDEST events first so a
-    timeline reads start-to-finish deterministically."""
+    All filters AND together. By default limit keeps the OLDEST events
+    first so timelines read start-to-finish deterministically; tail=True
+    keeps the NEWEST events instead (live feeds)."""
     picked = []
     for e in sim.event_log:
         if types is not None and e.type not in types:
@@ -69,6 +71,8 @@ def build_timeline(
         if until_tick is not None and e.tick >= until_tick:
             continue
         picked.append(e)
+    if tail:
+        return picked[-max(0, limit):]
     return picked[: max(0, limit)]
 
 

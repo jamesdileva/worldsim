@@ -86,6 +86,18 @@ class LLMDrivenAgent(Agent):
             if result is not None and result.ok and result.advice is not None:
                 self._last_advice_tick = sim.tick
                 self._queue_intents(sim, settlement, result)
+            elif result is not None and not result.ok:
+                # S63: failed advice must be visible too - otherwise a
+                # downed or busy Ollama looks identical to "no advice".
+                try:
+                    sim.log_event(
+                        "advice",
+                        [settlement.id],
+                        f"{settlement.name} could not reach its advisor: "
+                        f"{result.error or 'unknown error'}",
+                    )
+                except Exception:  # noqa: BLE001
+                    pass
             due, _why = should_reason(
                 self.config, sim, settlement, self._last_advice_tick)
             if due and not self.advisor.busy:

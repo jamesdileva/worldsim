@@ -5,6 +5,45 @@ Decisions worth remembering are marked **[DECISION]**.
 
 ---
 
+## Session 63c - Watchability round: pacing, timeline tail, viable colonies
+
+**User playtest**: wars ended in wall-clock seconds; timeline froze
+after a while; god colonies still wiped instantly; roads effectively
+free; no counsel entries despite Ollama running.
+
+**Root causes**
+- run loop had time.sleep(0): hundreds of ticks/second - a 1500-tick
+  war really did last ~3 seconds of wall time.
+- /api/timeline used build_timeline head-truncation: once the log held
+  >limit events the feed showed the FIRST 40 events forever.
+- God colonies inside foreign land owned ONE tile (3x3 claim only takes
+  UNOWNED tiles) -> zero income -> starved.
+- Advice failures were invisible: only successes logged.
+- Flat ROAD_COST_STONE=1 vs thousands of stockpiled stone = free roads.
+
+**Fixes**
+- start_run paced at DEFAULT_RUN_TPS=120 (perf-counter frame budget);
+  /api/run accepts ticks_per_second. Wars now last ~12+ wall seconds.
+- build_timeline(tail=True) keeps NEWEST; live feed uses it.
+- god_spawn_settlement claims radius-2 starter territory by eminent
+  domain (transfers owned tiles); reports territory_claimed_radius.
+- Failed advice logs a visible advice event (could not reach advisor:
+  <error>).
+- road_cost(settlement): stone * (1 + roads/25) escalating marginal cost.
+- Fast suite: 691 passing. Exe rebuilt + pacing verified live via HTTP
+  (128 ticks in 2s).
+
+### Decisions
+
+- **[WHY] Pace the loop rather than shorten wars**: war/exhaustion/
+  battle cadences are tick-based sim semantics; the bug was presentation
+  speed. 120 tps keeps worlds lively but followable.
+- **[WHY] Eminent domain for colonies**: a colony inside a civilization
+  needs contiguous farmland to live; anything less is theater.
+
+---
+
+
 ## Session 63b - Advice capture in the timeline
 
 **User question**: does LLM advice show in the timeline? It did not -
