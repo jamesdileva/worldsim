@@ -24,6 +24,13 @@ if ($LASTEXITCODE -ne 0) {
     exit 1
 }
 
+# Ship the local LLM config (model choice) next to the exe when present.
+if (Test-Path data\world_sim\llm_config.json) {
+    New-Item -ItemType Directory -Force -Path "dist\worldsim\data\world_sim" | Out-Null
+    Copy-Item data\world_sim\llm_config.json "dist\worldsim\data\world_sim\" -Force
+    Write-Host "llm_config.json shipped with exe"
+}
+
 Write-Host ""
 Write-Host "done: dist\worldsim\worldsim.exe" -ForegroundColor Green
 Write-Host "smoke test: start it, create a world, step, smite, undo."
