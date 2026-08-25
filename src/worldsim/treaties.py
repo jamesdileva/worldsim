@@ -97,6 +97,13 @@ def would_accept(sim, proposer: Settlement, target: Settlement,
     score = sim.relations.score(proposer.id, target.id)
     if score < FRIENDLY_THRESHOLD:
         return False, "relations_too_low"
+    # Personality friction (S60): aggressive civilizations demand warmer
+    # relations before signing away their freedom of action — without
+    # this every world treaty-converges to permanent peace instantly.
+    aggression = float(target.personality.get("aggression", 0.5))
+    required = FRIENDLY_THRESHOLD + max(0.0, aggression - 0.5) * 80.0
+    if score < required:
+        return False, "target_wary_of_aggression"
     if treaty_between(sim, proposer.id, target.id) is not None:
         return False, "treaty_exists"
     if clauses == [CLAUSE_TRIBUTE]:

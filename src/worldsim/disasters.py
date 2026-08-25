@@ -30,7 +30,12 @@ CONTAMINATION_TICKS = 7_300      # ~20 years at ~365 ticks/year
 CONTAMINATION_YIELD_FACTOR = 0.25
 # Outweighs the baseline happiness recovery rate (~0.005/tick): despair
 # from living in fallout beats ordinary good news.
-CONTAMINATION_HAPPINESS_DECAY = 0.01  # per tick while inside a zone
+# Per-covering-zone decay. Scaled by zone count: one strike grinds,
+# stacked strikes crush morale toward the floor. The floor sits just
+# above LOW_HAPPINESS_THRESHOLD so fallout alone never triggers the
+# misery-collapse — famine and war still can (S60).
+CONTAMINATION_HAPPINESS_DECAY = 0.02  # per tick per active zone
+DESPAIR_HAPPINESS_FLOOR = 0.12
 
 
 def season_of(tick: int) -> str:

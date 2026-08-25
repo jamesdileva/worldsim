@@ -45,6 +45,9 @@ def assign_personality(seed: int, settlement_index: int) -> dict[str, float]:
 
 GROWTH_INTERVAL_TICKS = 24
 STARVATION_INTERVAL_TICKS = 48
+# S60: below this morale, population growth stalls (no decline —
+# starvation handles that). Keeps nuked/warring cities visibly behind.
+GROWTH_MIN_HAPPINESS = 0.4
 STARTING_POPULATION = 10
 STARTING_FOOD = 50
 # Starting reserves sized to afford the first Farm (5w3s) + Sawmill (4w2s).
@@ -165,15 +168,23 @@ class Settlement:
         self.net_food_rate = income - consumption
 
     def step_population(self, growth_multiplier: int = 1) -> None:
-        """Advance growth/starvation counters by one tick."""
+        """Advance growth/starvation counters by one tick.
+
+        S60: growth requires basic contentment — a demoralized society
+        does not expand. Starvation decline is unchanged."""
         if not self.is_alive:
             return
         if self.food_stock > 0:
-            self.starvation_progress = 0
-            self.growth_progress += growth_multiplier
-            while self.growth_progress >= GROWTH_INTERVAL_TICKS:
-                self.growth_progress -= GROWTH_INTERVAL_TICKS
-                self.population += 1
+            if self.happiness >= GROWTH_MIN_HAPPINESS:
+                self.starvation_progress = 0
+                self.growth_progress += growth_multiplier
+                while self.growth_progress >= GROWTH_INTERVAL_TICKS:
+                    self.growth_progress -= GROWTH_INTERVAL_TICKS
+                    self.population += 1
+            else:
+                # Fed but demoralized: growth stalls, no decline.
+                self.starvation_progress = 0
+                self.growth_progress = 0
         else:
             self.growth_progress = 0
             self.starvation_progress += 1

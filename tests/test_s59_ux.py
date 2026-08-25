@@ -1,6 +1,8 @@
 """Sprint 59 desktop-UX round: road density cap, god spawn claim,
 war overlay grid data, optional LLM advisor wiring."""
 
+import numpy as np
+
 import pytest
 
 from worldsim.db import WorldStore
@@ -32,6 +34,70 @@ def test_territory_roads_respect_density_cap():
             worst = max(worst, roads / owned)
     assert worst <= ROAD_DENSITY_CAP + 0.05, (
         f"road density {worst:.2f} exceeds cap {ROAD_DENSITY_CAP}")
+
+
+def test_roads_serve_buildings():
+    # S60 preference: at least one road tile should sit beside a
+    # building once a city has both.
+    sim = _sim(ticks=800)
+    found = False
+    for s in sim.settlements:
+        if not s.is_alive:
+            continue
+        idx = sim.settlements.index(s)
+        roads = {
+            (y, x)
+            for y, x in np.argwhere(
+                sim.world.improvements == 0)
+            if sim.world.ownership[y, x] == idx
+        }
+        buildings = {
+            (int(y), int(x))
+            for y, x in np.argwhere(
+                (sim.world.ownership == idx)
+                & (sim.world.improvements >= 1))
+        }
+        if buildings and roads:
+            for by, bx in buildings:
+                for dy, dx in ((0, 1), (1, 0), (0, -1), (-1, 0)):
+                    if (by + dy, bx + dx) in roads:
+                        found = True
+                        break
+        if found:
+            break
+    assert found, "no road serves any building"
+
+
+# ----------------------------------------------------------------------
+# Treaty friction (S60): aggressive targets demand warmer relations
+# ----------------------------------------------------------------------
+
+def _accept_fixture():
+    sim = Simulation(World(seed=42, size=64))
+    sim.spawn_settlements(count=2)
+    a, b = sim.settlements[0], sim.settlements[1]
+    return sim, a, b
+
+
+def test_wary_aggressive_target_refuses_lukewarm_relations():
+    from worldsim.treaties import CLAUSE_TRADE_PACT, would_accept
+
+    sim, a, b = _accept_fixture()
+    b.personality["aggression"] = 0.95
+    sim.relations.adjust(a.id, b.id, 30.0)  # friendly but not warm
+    ok, reason = would_accept(
+        sim, a, b, [CLAUSE_TRADE_PACT])
+    assert not ok and reason == "target_wary_of_aggression"
+
+
+def test_mild_target_accepts_as_before():
+    from worldsim.treaties import CLAUSE_TRADE_PACT, would_accept
+
+    sim, a, b = _accept_fixture()
+    b.personality["aggression"] = 0.5
+    sim.relations.adjust(a.id, b.id, 30.0)
+    ok, reason = would_accept(sim, a, b, [CLAUSE_TRADE_PACT])
+    assert ok, reason
 
 
 # ----------------------------------------------------------------------
@@ -139,3 +205,12 @@ def test_enable_llm_attaches_agents_on_new_world(tmp_path):
             assert isinstance(agent, Agent)
     finally:
         store.close()
+
+
+def test_enable_llm_model_override(tmp_path):
+    from worldsim.webapp import WorldSession
+
+    session = WorldSession(store=WorldStore(tmp_path / 'w.db'))
+    assert session.enable_llm(model='gemma2:2b') is True
+    assert session.llm_client.config.model == 'gemma2:2b'
+    session.llm_advisor = None

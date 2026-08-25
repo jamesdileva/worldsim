@@ -74,7 +74,12 @@ class WorldSession:
             from .reasoning import BackgroundAdvisor, ReasoningConfig
         except ImportError:
             return False
-        config = LLMConfig(model=model) if model else LLMConfig()
+        # Precedence: explicit --llm-model > llm_config.json > defaults,
+        # matching the llm CLI.
+        config = (
+            LLMConfig.load(overrides={"model": model})
+            if model else LLMConfig.load()
+        )
         self.llm_client = OllamaClient(config=config)
         # Rare by design: interval advice plus big-event triggers only.
         self.reasoning_config = ReasoningConfig(

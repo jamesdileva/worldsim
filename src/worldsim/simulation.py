@@ -670,6 +670,41 @@ class Simulation:
             maybe_start_highways(self, settlement)
             return
         size = self.world.size
+        # Preference order: tiles adjacent to existing buildings serve
+        # production first; among equals, step toward the nearest other
+        # city so networks lean into trade routes instead of sprawling.
+        others = [
+            (o.spawn_y, o.spawn_x)
+            for o in self.settlements
+            if o.is_alive and o.id != settlement.id
+        ]
+        buildings = set()
+        if others:
+            idx = self.settlements.index(settlement)
+            building_tiles = np.argwhere(
+                np.logical_and(
+                    self.world.ownership == idx,
+                    self.world.improvements
+                    >= Improvement.FARM.value,
+                )
+            )
+            buildings = {(int(y), int(x)) for y, x in building_tiles}
+
+        def _rank(ny: int, nx: int) -> tuple[int, float]:
+            serves = any(
+                max(abs(ny - by), abs(nx - bx)) == 1
+                for by, bx in buildings
+            )
+            if others:
+                dist = min(
+                    max(abs(ny - oy), abs(nx - ox))
+                    for oy, ox in others
+                )
+            else:
+                dist = 0
+            return (0 if serves else 1, float(dist))
+
+        candidates: list[tuple[tuple[int, float], int, int]] = []
         for ay, ax in sorted(anchor):
             for dy, dx in ((0, 1), (1, 0), (0, -1), (-1, 0)):
                 ny, nx = ay + dy, ax + dx
@@ -682,8 +717,12 @@ class Simulation:
                     and TerrainType(self.world.terrain[ny, nx])
                     != TerrainType.WATER
                 ):
-                    if self.build_road(settlement, nx, ny):
-                        return
+                    candidates.append((_rank(ny, nx), ny, nx))
+        if candidates:
+            candidates.sort(key=lambda c: c[0])
+            _key, ny, nx = candidates[0]
+            if self.build_road(settlement, nx, ny):
+                return
         # Own network saturated: look outward.
         maybe_start_highways(self, settlement)
 
@@ -2304,15 +2343,27 @@ class Simulation:
 
             apply_army_upkeep(settlement)
             # Sprint 42: fallout bleeds happiness from contaminated spawns.
-            if settlement.frozen is False and self._settlement_contaminated(
-                settlement
-            ):
-                from .disasters import CONTAMINATION_HAPPINESS_DECAY
-
-                settlement.happiness = max(
-                    0.0,
-                    settlement.happiness - CONTAMINATION_HAPPINESS_DECAY,
+            # S60: despair scales with the number of covering zones — one
+            # strike grinds, stacked strikes become a death spiral. A flat
+            # 0.01 was exactly cancelled by mature-city recovery
+            # (0.005 base + up to 0.005 building quality).
+            if settlement.frozen is False:
+                zones_on_spawn = sum(
+                    1 for z in self.contamination_zones
+                    if z.is_active(self.tick)
+                    and z.covers(settlement.spawn_x, settlement.spawn_y)
                 )
+                if zones_on_spawn:
+                    from .disasters import (
+                        CONTAMINATION_HAPPINESS_DECAY,
+                        DESPAIR_HAPPINESS_FLOOR,
+                    )
+
+                    settlement.happiness = max(
+                        DESPAIR_HAPPINESS_FLOOR,
+                        settlement.happiness
+                        - CONTAMINATION_HAPPINESS_DECAY * zones_on_spawn,
+                    )
             self._produce_resources(settlement)
             income = self.food_income(settlement) * self._drought_multiplier(
                 settlement

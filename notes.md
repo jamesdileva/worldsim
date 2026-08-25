@@ -5,6 +5,51 @@ Decisions worth remembering are marked **[DECISION]**.
 
 ---
 
+## Session 61 - 2026-08-24 - Realism round: bee-line roads, treaty friction, despair economics
+
+**User asks investigated empirically (nuke experiment scripts)**
+- Roads already cost stone; sprawl was affordability + no direction
+  preference. Rule now ranks candidate tiles: building-adjacent first,
+  then greedy step toward nearest other city (bee-line without
+  pathfinding), density cap still applies.
+- Happiness pinned at 1.0 under fallout: recovery (0.005 base + up to
+  0.005 building quality) EXACTLY cancelled the 0.01 bleed. S42 tuned
+  against base rate only.
+- Pop convergence root cause: growth was purely food-driven - happiness
+  played NO role, so miserable cities regrew at full speed off full
+  granaries.
+- Treaty convergence: would_accept had no personality friction.
+
+**What changed**
+- Road ranking (buildings -> toward cities) on top of the 0.35 cap.
+- CONTAMINATION_HAPPINESS_DECAY 0.02 PER ZONE (stacked strikes crush),
+  with DESPAIR_HAPPINESS_FLOOR=0.12 just above the collapse threshold:
+  fallout alone maims but never triggers misery-collapse.
+- GROWTH_MIN_HAPPINESS=0.4: demoralized cities stop growing (fed but
+  unhappy = stalled, NOT starving). Nuked city now survives small and
+  miserable (1 nuke: pop 11 vs neighbors 82) - persistent divergence,
+  exactly the requested dynamics. Triple-nuke collapse still possible
+  via famine when yields are suppressed.
+- Treaty friction: aggressive targets require warmer relations
+  (required = FRIENDLY + max(0, aggr-0.5)*80); mild civs unchanged.
+- enable_llm uses LLMConfig.load precedence; llm_config.json set to
+  gemma2:2b and shipped next to the exe.
+- Fast suite: 674 passing. Exe rebuilt + config copied.
+
+### Decisions
+
+- **[WHY] Growth gates on happiness**: makes morale economically real;
+  war/devastation now leaves lasting scars instead of instant regrowth.
+- **[WHY] Despair floor above collapse threshold**: user expectation -
+  a nuked city should survive smaller and sad, not auto-die; famine
+  remains the killer when fallout suppresses yields.
+- **[GOTCHA] Exact cancellation trap**: any flat decay equal to max
+  recovery is invisible on prosperous cities - tune against the ceiling,
+  not the baseline.
+
+---
+
+
 ## Session 60 - 2026-08-24 - Roads-as-cities, god claims, war overlay, optional live LLM
 
 **User questions investigated and answered**
