@@ -833,6 +833,25 @@ Agents replace auto-rules; the frozen RL contract is born
 - **[NOTE] Curves come from in-RAM epoch history**; reloading a saved
   world starts epochs fresh (documented S45 limitation).
 
+### Session 61 - Realism round (this session)
+- Nuke experiments exposed two deep issues: happiness pinned at
+  1.0 under fallout (recovery ceiling exactly cancelled the 0.01
+  bleed) and pops converging (growth was purely food-driven).
+- Fixes: per-zone despair 0.02 with DESPAIR_HAPPINESS_FLOOR=0.12
+  (fallout maims, never auto-kills); GROWTH_MIN_HAPPINESS=0.4 gates
+  population growth - devastated cities now stay visibly behind.
+- Road rule ranks candidates: building-adjacent first, then greedy
+  step toward nearest city (bee-line without pathfinding).
+- Treaty friction: aggressive targets need warmer relations
+  (+80 x aggression above FRIENDLY threshold); worlds no longer
+  instantly treaty-converge.
+- gemma2:2b as default LLM via data/world_sim/llm_config.json;
+  build script ships it next to the exe. Fast suite: 674 passing.
+- **[WHY] Growth gates on happiness**: morale is now economically
+  real; devastation leaves lasting scars instead of instant regrowth.
+- **[GOTCHA] Exact cancellation trap**: flat decay equal to max
+  recovery is invisible on prosperous cities - tune vs the ceiling.
+
 ### Session 60 - Roads/god-spawn/war-overlay/LLM round (this session)
 - Road physics changed: territory roads capped at
   ROAD_DENSITY_CAP=0.35 of owned tiles; saturation hands off to
