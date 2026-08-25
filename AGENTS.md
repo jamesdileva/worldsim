@@ -847,6 +847,14 @@ Agents replace auto-rules; the frozen RL contract is born
 - **[WHY] One guaranteed antagonist**: conflict becomes POSSIBLE in
   every world but stays emergent.
 
+### Session 62b - Army manpower cap (this session)
+- User report: pop 200 with army ~5000. Fixed armies equilibrated
+  at food-surplus, not manpower: MAX_SOLDIERS_PER_POP=1.0 training
+  cap + demobilization of inherited bloat (0.5%/tick of excess).
+- **[WHY] Cap over bigger upkeep**: upkeep tying armies to economy
+  is interesting; it just needs a sanity ceiling - soldiers are people.
+- Fast suite: 680 passing. Exe rebuilt + smoke: armies track pop.
+
 ### Session 61 - Realism round (this session)
 - Nuke experiments exposed two deep issues: happiness pinned at
   1.0 under fallout (recovery ceiling exactly cancelled the 0.01
