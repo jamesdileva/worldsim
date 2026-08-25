@@ -890,6 +890,15 @@ Agents replace auto-rules; the frozen RL contract is born
   based sim semantics; presentation speed was the actual bug.
 - Fast suite: 691 passing. Exe rebuilt + pacing verified via HTTP.
 
+### Session 63d - Throttling + founder wealth (this session)
+- Ollama failures flooded the timeline: counsel failure logs now
+  throttle to streak-start + one per 2500t. Advisor queue clarified:
+  submit REJECTS while busy - no pileup; 10054 resets are Ollama-side.
+- FOUNDER WEALTH VARIANCE 0.6x-1.5x (seeded): identical starts meant
+  identical equilibria; early wealth now compounds into real leads
+  without needing disasters. Market clamp test re-pinned.
+- Fast suite: 692 passing. Exe rebuilt.
+
 ### Session 62b - Army manpower cap (this session)
 - User report: pop 200 with army ~5000. Fixed armies equilibrated
   at food-surplus, not manpower: MAX_SOLDIERS_PER_POP=1.0 training
