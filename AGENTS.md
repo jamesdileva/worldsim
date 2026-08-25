@@ -833,6 +833,20 @@ Agents replace auto-rules; the frozen RL contract is born
 - **[NOTE] Curves come from in-RAM epoch history**; reloading a saved
   world starts epochs fresh (documented S45 limitation).
 
+### Session 62 - Founding grace round (this session)
+- User reports: spawned settlements happiness-dive to 0; post-nuke
+  re-spawned civs die fast inside fallout; pops even out; war rare.
+- Fixes: FOUNDING_GRACE_TICKS=600 (young settlements immune to
+  negative-food morale decay via persisted created_at_tick);
+  _try_resettle_ruin refuses ruins inside active fallout zones;
+  spawn_settlements guarantees a military antagonist (most aggressive
+  settlement, aggression >= 0.75, deterministic); map key shows real
+  terrain color chips.
+- **[WHY] Grace over stockpile**: the problem was morale math, not
+  food math - founders arrive optimistic.
+- **[WHY] One guaranteed antagonist**: conflict becomes POSSIBLE in
+  every world but stays emergent.
+
 ### Session 61 - Realism round (this session)
 - Nuke experiments exposed two deep issues: happiness pinned at
   1.0 under fallout (recovery ceiling exactly cancelled the 0.01
