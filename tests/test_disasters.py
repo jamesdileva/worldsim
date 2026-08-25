@@ -189,7 +189,11 @@ def test_happiness_recovers_with_positive_food():
 
 
 def test_collapse_via_low_happiness():
+    from worldsim.settlement import FOUNDING_GRACE_TICKS
+
     sim, (s,) = make_sim(seed=42)
+    # S61 founding grace shields young settlements; age past it.
+    s.created_at_tick = sim.tick - FOUNDING_GRACE_TICKS - 1
     sim.release_territory(s)
     s.food_stock = 0
     s.happiness = LOW_HAPPINESS_THRESHOLD - 0.01

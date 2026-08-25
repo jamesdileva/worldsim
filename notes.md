@@ -5,6 +5,47 @@ Decisions worth remembering are marked **[DECISION]**.
 
 ---
 
+## Session 62 - 2026-08-24 - Founding grace, no crater-settling, guaranteed antagonist
+
+**User reports**: spawned settlements happiness-dive to 0 and die;
+post-nuke re-spawned civs all die fast (pop 10, hap 0); pops still
+even out; war still rare; map key terrain shows only ~ glyphs.
+
+**Root causes**
+- New settlements: income is ZERO until the first farm completes ->
+  negative-net-food craters happiness below GROWTH_MIN_HAPPINESS within
+  ~10 ticks; S60 growth gate then kept them stunted permanently.
+- Post-nuke deaths: ruin resettlement was spawning INSIDE active
+  fallout zones (25% yields + despair floor) - doomed on arrival.
+- War rarity: archetypes are uniform random per seed; worlds with zero
+  military civs structurally can never see war.
+
+**Fixes**
+- FOUNDING_GRACE_TICKS=600: young settlements don't lose morale to
+  negative net food while farms come online (uses persisted
+  created_at_tick - no schema change).
+- _try_resettle_ruin refuses ruins inside active contamination zones.
+- spawn_settlements guarantees an antagonist: if no military archetype,
+  the most aggressive settlement (ties: lowest index) is designated
+  military with aggression >= 0.75. Deterministic per seed.
+- Map key shows real terrain color chips instead of ~ glyphs.
+
+Tests: test_s61_followups.py (4 new); collapse-pathway test aged past
+grace. Fast suite green after fix. Exe rebuild deferred - user has the
+game open (world.db lock).
+
+### Decisions
+
+- **[WHY] Grace period over bigger starting stockpile**: the problem was
+  morale math, not food math; grace says founders arrive optimistic
+  without distorting early-game economy.
+- **[WHY] One guaranteed antagonist, not forced wars**: conflict becomes
+  POSSIBLE everywhere but still emergent - peaceful seeds stay peaceful
+  unless the military civ actually escalates.
+
+---
+
+
 ## Session 61 - 2026-08-24 - Realism round: bee-line roads, treaty friction, despair economics
 
 **User asks investigated empirically (nuke experiment scripts)**

@@ -381,6 +381,25 @@ class Simulation:
             )
             self._register_settlement(settlement)
             spawned.append(settlement)
+        # S61: guarantee an antagonist. Archetypes are random per seed;
+        # worlds with zero military civilizations can never see war, which
+        # made every run a permanent peace conference. The most aggressive
+        # settlement (ties: lowest index) is designated military.
+        if spawned and not any(
+            s.personality.get("archetype") == "military"
+            for s in self.settlements
+        ):
+            antagonist = max(
+                range(len(self.settlements)),
+                key=lambda i: (
+                    self.settlements[i].personality.get("aggression", 0.5),
+                    -i,
+                ),
+            )
+            chosen = self.settlements[antagonist]
+            chosen.personality["archetype"] = "military"
+            chosen.personality["aggression"] = max(
+                0.75, chosen.personality.get("aggression", 0.5))
         return spawned
 
     # ------------------------------------------------------------------
@@ -1572,6 +1591,14 @@ class Simulation:
         age = self.tick - ruin.collapse_tick
         if age < RUIN_RESETTLE_MIN_AGE or age % 100 != 0:
             return None
+        # S61: nobody settles a glowing crater — ruins inside active
+        # fallout stay empty until the zones expire.
+        if any(
+            z.is_active(self.tick)
+            and z.covers(ruin.spawn_x, ruin.spawn_y)
+            for z in self.contamination_zones
+        ):
+            return None
         rng = random.Random(
             (self.world.seed ^ RUIN_SEED_OFFSET)
             + zlib.crc32(ruin.id.encode()) * 31
@@ -2378,7 +2405,8 @@ class Simulation:
             )
             settlement.step_population(growth_multiplier)
             settlement.step_happiness(
-                building_count=sum(self.buildings_of(settlement).values())
+                building_count=sum(self.buildings_of(settlement).values()),
+                tick=self.tick,
             )
             if was_alive and not settlement.is_alive:
                 self._kill(settlement)

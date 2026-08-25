@@ -48,6 +48,9 @@ STARVATION_INTERVAL_TICKS = 48
 # S60: below this morale, population growth stalls (no decline —
 # starvation handles that). Keeps nuked/warring cities visibly behind.
 GROWTH_MIN_HAPPINESS = 0.4
+# S61: young settlements don't lose morale to negative net food while
+# their first farms come online.
+FOUNDING_GRACE_TICKS = 600
 STARTING_POPULATION = 10
 STARTING_FOOD = 50
 # Starting reserves sized to afford the first Farm (5w3s) + Sawmill (4w2s).
@@ -128,16 +131,27 @@ class Settlement:
         """True while any resource inventory is negative (poverty slowdown)."""
         return any(v < 0 for v in self.resource_inventory.values())
 
-    def step_happiness(self, building_count: int) -> None:
+    def step_happiness(
+        self, building_count: int, tick: int | None = None
+    ) -> None:
         """Advance happiness by one tick (Sprint 5).
 
         Decays after 10+ consecutive ticks of negative net food; recovers
-        slowly otherwise, scaled slightly by building quality."""
+        slowly otherwise, scaled slightly by building quality. Young
+        settlements get a founding grace period (S61): morale does not
+        decay while the first farms come online."""
         if self.net_food_rate < 0:
             self.negative_food_streak += 1
         else:
             self.negative_food_streak = 0
-        if self.negative_food_streak > HAPPINESS_DECAY_AFTER_TICKS:
+        in_founding_grace = (
+            tick is not None
+            and tick - self.created_at_tick < FOUNDING_GRACE_TICKS
+        )
+        if (
+            self.negative_food_streak > HAPPINESS_DECAY_AFTER_TICKS
+            and not in_founding_grace
+        ):
             self.happiness = max(
                 HAPPINESS_MIN, self.happiness - HAPPINESS_DECAY_RATE
             )
