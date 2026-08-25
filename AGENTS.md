@@ -847,6 +847,27 @@ Agents replace auto-rules; the frozen RL contract is born
 - **[WHY] One guaranteed antagonist**: conflict becomes POSSIBLE in
   every world but stays emergent.
 
+### Session 63 - War unblocked / merged timeline (this session)
+- Instrumented probes found the eternal-peace chain: trade
+  auto-alliance (no personality check, no dissolution) -> everyone
+  allied by t=500 -> zero border friction -> zero contested tiles ->
+  zero raid targets; seed 3 also had two PACIFIST militaries
+  (0.46/0.126) slipping past the antagonist override.
+- Fixes: hardliners (aggr >= 0.75) refuse trade alliances;
+  _expire_cold_alliances dissolves alliances below FRIENDLY;
+  antagonist guarantee now enforces military + aggr >= 0.75 even
+  over passive natural militaries.
+- God colonies spawn at pop 30 (were absorbed instantly at 10).
+- Highways rendered road-brown over local roads + legend chip;
+  status list shows wood/stone/metal stockpiles.
+- What\x27s-happening merged into Timeline: summary header (tick/
+  pop/roads/highways/wars) + category-badged tick-stamped entries.
+- Desktop LLM advisor ON by default (--no-llm disables); rules-only
+  fallback when Ollama down. Charts 480px, click opens full-size.
+- Fast suite: 685 passing. Exe rebuilt + smoke vs live exe.
+- **[WHY] Hardliner refusal over alliance decay alone**: the
+  antagonist must stay unallied or war stays structurally impossible.
+
 ### Session 62b - Army manpower cap (this session)
 - User report: pop 200 with army ~5000. Fixed armies equilibrated
   at food-surplus, not manpower: MAX_SOLDIERS_PER_POP=1.0 training
