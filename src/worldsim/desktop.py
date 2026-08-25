@@ -17,7 +17,7 @@ def launch_desktop(
     world_id: str | None = None,
     width: int = 1280,
     height: int = 800,
-    llm: bool = False,
+    llm: bool | None = None,
     llm_model: str | None = None,
 ) -> int:
     """Start the API server + open the desktop window. Blocks until the
@@ -38,7 +38,11 @@ def launch_desktop(
 
     store = WorldStore(db_path) if db_path else WorldStore()
     session = WorldSession(store=store)
-    if llm:
+    # Desktop default: advisor ON (gemma2:2b via shipped config) so
+    # double-click users get the full experience; silently rules-only
+    # when Ollama is not running.
+    use_llm = llm if llm is not None else True
+    if use_llm:
         if session.enable_llm(model=llm_model):
             print(f"LLM advisor enabled"
                   f"{f' (model: {llm_model})' if llm_model else ''}")
@@ -88,15 +92,18 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--port", type=int, default=8600)
     parser.add_argument("--db", default=str(DEFAULT_DB_PATH))
     parser.add_argument("--world-id", default=None)
-    parser.add_argument("--llm", action="store_true",
-                        help="attach a background Ollama advisor")
+    parser.add_argument("--no-llm", action="store_true",
+                        help="disable the background Ollama advisor "
+                             "(on by default; skipped when Ollama is down)")
     parser.add_argument("--llm-model", default=None,
                         help="Ollama model override "
-                             "(try llama3.2:3b for speed)")
+                             "(default from llm_config.json)")
     args = parser.parse_args(argv)
     return launch_desktop(
         host=args.host, port=args.port, db_path=args.db,
-        world_id=args.world_id, llm=args.llm, llm_model=args.llm_model)
+        world_id=args.world_id,
+        llm=False if args.no_llm else None,
+        llm_model=args.llm_model)
 
 
 if __name__ == "__main__":

@@ -149,6 +149,10 @@ def _force_mutual_trades(sim: Simulation, a, b):
 
 def test_alliance_forms_after_three_mutual_trades():
     sim, (a, b) = make_sim(seed=42, count=2)
+    # S62: hardliners (aggression >= 0.75) refuse trade alliances; this
+    # test exercises the mutual-trade mechanic with reasonable civs.
+    a.personality["aggression"] = 0.4
+    b.personality["aggression"] = 0.4
     force_adjacent(sim, a, b)
     _force_mutual_trades(sim, a, b)
     assert sim.diplomacy.is_allied(a.id, b.id)
@@ -168,6 +172,8 @@ def test_same_side_trades_do_not_form_alliance():
 
 def test_allies_cannot_raid_each_other():
     sim, (a, b) = make_sim(seed=42, count=2)
+    a.personality["aggression"] = 0.4
+    b.personality["aggression"] = 0.4
     force_adjacent(sim, a, b)
     _force_mutual_trades(sim, a, b)
     assert sim.diplomacy.is_allied(a.id, b.id)

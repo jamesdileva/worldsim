@@ -82,6 +82,12 @@ function drawMap(data) {
       ctx.fillRect(x * cell + cell * 0.15, y * cell + cell * 0.15,
                    cell * 0.7, cell * 0.7);
     }
+    // Highways (inter-city projects) render in road-brown on top.
+    ctx.fillStyle = "#8a5a2a";
+    for (const [x, y] of data.highways || []) {
+      ctx.fillRect(x * cell + cell * 0.1, y * cell + cell * 0.1,
+                   cell * 0.8, cell * 0.8);
+    }
     ctx.font = `${Math.max(7, cell * 1.6)}px monospace`;
     ctx.textAlign = "center";
     for (const [x, y, kind] of data.buildings || []) {
@@ -197,35 +203,61 @@ async function refreshStatus() {
   list.innerHTML = "";
   for (const s of status.settlements) {
     const li = document.createElement("li");
-    li.textContent = `${s.name}: pop ${s.population} · era ${s.era} · ` +
-      `army ${s.army} · happy ${s.happiness}${s.frozen ? " · FROZEN" : ""}`;
+    li.textContent =
+      `${s.name}: pop ${s.population} · era ${s.era} · ` +
+      `army ${s.army} · happy ${s.happiness}` +
+      `${s.frozen ? " · FROZEN" : ""}\n` +
+      `food ${s.food_stock ?? "?"} · wood ${s.wood ?? "?"} · ` +
+      `stone ${s.stone ?? "?"} · metal ${s.metal ?? "?"}`;
+    li.style.whiteSpace = "pre-line";
     list.appendChild(li);
   }
   return true;
 }
 
+const CATEGORY_COLORS = {
+  warfare: "#ff6b6b",
+  diplomacy: "#7fb3ff",
+  trade: "#7fd98a",
+  divine: "#ffd166",
+  disasters: "#c792ea",
+  civilization: "#64d8cb",
+  other: "#9aa0a6",
+};
+
 async function refreshFeed() {
-  const feed = await (await api("/api/timeline?limit=25")).json();
+  const data = await (await api("/api/timeline?limit=40")).json();
+  // Summary header: world pulse in one line.
+  const roads = gridCache ? gridCache.roads.length : 0;
+  const highways = gridCache ? (gridCache.highways || []).length : 0;
+  const wars = gridCache ? (gridCache.wars || []).length : 0;
+  const pops = gridCache
+    ? gridCache.settlements.map((s) => s.population)
+    : [];
+  const totalPop = pops.reduce((a, b) => a + b, 0);
+  $("timeline-summary").textContent =
+    `tick ${gridCache ? gridCache.tick : "?"} · ` +
+    `${totalPop} people in ${pops.length} cities · ` +
+    `${roads} road tiles · ${highways} highway tiles · ` +
+    `${wars} active war${wars === 1 ? "" : "s"}`;
   const list = $("feed");
   list.innerHTML = "";
-  for (const line of feed.rendered.slice().reverse()) {
+  for (const line of data.rendered.slice().reverse()) {
+    const match = line.match(/^\[t(\d+)\] \((\w+)\)\s*(.*)$/);
     const li = document.createElement("li");
-    li.textContent = line.replace(/^\[[^\]]+\]\s*/, "");
+    if (match) {
+      const [, tick, category, rest] = match;
+      li.innerHTML =
+        `<span class="tstamp">t${tick}</span>` +
+        `<span class="cat" style="color:${CATEGORY_COLORS[category] ||
+          CATEGORY_COLORS.other}">${category}</span>` +
+        `<span class="desc"></span>`;
+      li.querySelector(".desc").textContent = rest;
+    } else {
+      li.textContent = line;
+    }
     list.appendChild(li);
   }
-}
-
-async function refreshWhatsHappening() {
-  const events = await (
-    await api("/api/timeline?limit=6")
-  ).json();
-  const latest = events.rendered.slice(-3).reverse();
-  const summary = latest.length
-    ? latest.map((l) => l.replace(/\[t\d+\]\s*\([^)]*\)\s*/, "")).join(" • ")
-    : "the world is quiet…";
-  const roads = gridCache ? gridCache.roads.length : 0;
-  $("whats-happening").textContent =
-    `${summary} — agents have laid ${roads} road tiles so far.`;
 }
 
 async function refreshCharts() {
@@ -233,15 +265,19 @@ async function refreshCharts() {
   $("event-chart").src = "/api/charts/events.png?" + Date.now();
 }
 
+// Click a chart to open it full-size.
+for (const id of ["pop-chart", "event-chart"]) {
+  $(id).onclick = () => window.open($(id).src, "_blank");
+}
+
 async function refreshAll() {
   try {
     const hasWorld = await refreshStatus();
     if (hasWorld) {
       await refreshGrid();
+      await refreshFeed();
+      await refreshCharts();
     }
-    await refreshFeed();
-    await refreshWhatsHappening();
-    await refreshCharts();
   } catch (e) {
     showPageError("refresh", e);
   }
@@ -334,7 +370,6 @@ connectSocket();
 
 setInterval(refreshStatus, 3000);
 setInterval(refreshFeed, 3000);
-setInterval(refreshWhatsHappening, 3000);
 // Keep the map live while the world runs (the WS ticker only updates
 // status — without this the canvas freezes at its last explicit step).
 setInterval(() => {

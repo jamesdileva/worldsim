@@ -5,6 +5,55 @@ Decisions worth remembering are marked **[DECISION]**.
 
 ---
 
+## Session 63 - 2026-08-25 - War unblocked, merged timeline, LLM by default
+
+**User playtest (seed 3, year 207)** drove this round: no wars ever,
+red lines never seen, spurious [refresh] no-world error, highways
+indistinguishable from roads, god-spawn absorbed instantly, LLM needed
+terminal launch, charts too small, What's-happening redundant with
+Timeline.
+
+**Root cause chain for eternal peace (instrumented probes)**
+- Alliances form automatically from mutual trade with NO personality
+  check and NO dissolution mechanic -> everyone allied by t=500 ->
+  allied pairs generate zero border friction -> zero contested tiles ->
+  zero raid targets. Also seed 3 had TWO natural military archetypes,
+  both pacifists (aggression 0.46/0.126) - the antagonist override only
+  fired when zero militaries existed.
+
+**Fixes**
+- Antagonist guarantee upgraded: enforces military + aggression >= 0.75
+  on the most aggressive settlement whenever no such civ exists.
+- Hardliners (aggression >= 0.75) refuse trade alliances.
+- _expire_cold_alliances: alliances dissolve when pairwise relations
+  fall below FRIENDLY_THRESHOLD (logged diplomacy event).
+- God-spawned colonies start at pop 30 (GOD_SPAWN_POPULATION) so they
+  survive neighbor absorption.
+- /api/grid highways[] laid tiles; canvas renders them road-brown over
+  dark local roads; legend chip added.
+- /api/status now carries wood/stone/metal; status list shows
+  stockpiles (bless is visible now).
+- Merged What's-happening into Timeline: summary header line
+  (tick/pop/city/road/highway/war counts) + category-badged entries
+  with tick stamps; /api/timeline rendered lines now carry both.
+- Desktop enables the LLM advisor BY DEFAULT (--no-lm to disable);
+  silent rules-only fallback when Ollama is down.
+- Charts widened to 480px, click opens full-size in a new tab.
+- Spurious [refresh] error gone: feed/charts skipped pre-world.
+
+Fast suite: 685 passing. Exe rebuilt + HTTP smoke vs live exe.
+
+### Decisions
+
+- **[WHY] Hardliner alliance refusal**: trade-formed alliance was the
+  single wall making war structurally impossible; antagonists must stay
+  raidable, friendly civs keep their pacts.
+- **[WHY] Dissolution on cold relations**: gives diplomacy a full life
+  cycle instead of write-once eternity.
+
+---
+
+
 ## Session 62b - Army manpower cap
 
 **User report**: pop 200 with army ~5000. Root cause: training gains are

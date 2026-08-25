@@ -80,6 +80,8 @@ ROAD_INTERVAL_TICKS = 12
 ROAD_DENSITY_CAP = 0.35
 # God spawn claims land within this range of the clicked tile.
 GOD_SPAWN_SEARCH_RADIUS = 8
+# God-founded colonies arrive with real settlers (natural spawns are 10).
+GOD_SPAWN_POPULATION = 30
 # Build priority evaluated top-down; first type with a valid affordable site
 # is queued.
 BUILD_PRIORITY = [
@@ -381,14 +383,16 @@ class Simulation:
             )
             self._register_settlement(settlement)
             spawned.append(settlement)
-        # S61: guarantee an antagonist. Archetypes are random per seed;
-        # worlds with zero military civilizations can never see war, which
-        # made every run a permanent peace conference. The most aggressive
-        # settlement (ties: lowest index) is designated military.
-        if spawned and not any(
+        # S61/S62: guarantee a real antagonist. Natural military
+        # archetypes can still be pacifists (seed 3: aggr 0.46/0.126),
+        # so enforce military + high aggression on the most aggressive
+        # settlement whenever no such pair exists yet.
+        needs_antagonist = not any(
             s.personality.get("archetype") == "military"
+            and s.personality.get("aggression", 0.0) >= 0.75
             for s in self.settlements
-        ):
+        )
+        if spawned and needs_antagonist:
             antagonist = max(
                 range(len(self.settlements)),
                 key=lambda i: (
@@ -895,6 +899,11 @@ class Simulation:
         if (
             route.mutual_streak >= ALLIANCE_MUTUAL_TRADES
             and not self.diplomacy.is_allied(source.id, dest.id)
+            # S62: hardline civilizations do not bind themselves through
+            # commerce — otherwise trade auto-allying created permanent
+            # world peace and raids became structurally impossible.
+            and source.personality.get("aggression", 0.5) < 0.75
+            and dest.personality.get("aggression", 0.5) < 0.75
             and self.diplomacy.form_alliance(source.id, dest.id)
         ):
             self.log_event(
@@ -988,6 +997,9 @@ class Simulation:
             spawn_y=row,
             created_at_tick=self.tick,
         )
+        # God-founded colonies arrive with settlers, not a hamlet —
+        # pop-10 outposts were getting absorbed by neighbors instantly.
+        settlement.population = GOD_SPAWN_POPULATION
         self._register_settlement(settlement)
         # Godlike claim: the exact spawn tile becomes the new city's,
         # even if another civilization owned it.
@@ -1874,10 +1886,36 @@ class Simulation:
         self._neighbors_cache[settlement.id] = ids
         return [s for s in self.settlements if s.id in ids]
 
+    def _expire_cold_alliances(self) -> None:
+        """Dissolve alliances whose pairwise relations fell below the
+        friendly threshold. Deterministic; logs a diplomacy event."""
+        from .relations import FRIENDLY_THRESHOLD
+
+        for key in sorted(self.diplomacy.alliances, key=sorted):
+            id_a, id_b = tuple(key)
+            if self.relations.score(id_a, id_b) >= FRIENDLY_THRESHOLD:
+                continue
+            self.diplomacy.alliances.discard(key)
+            a = self.settlement_by_id(id_a)
+            b = self.settlement_by_id(id_b)
+            if a is None or b is None:
+                continue
+            self.log_event(
+                "diplomacy",
+                [id_a, id_b],
+                f"Alliance between {a.name} and {b.name} dissolved — "
+                f"relations have cooled",
+            )
+
     def _refresh_contested_zones(self) -> None:
         """Recompute contested border tiles: hostile-pair borders, plus
         borders of warlike military settlements (military pressure creates
-        border friction even before hostility)."""
+        border friction even before hostility). Also dissolves alliances
+        whose relations have gone cold (S62) — without this, trade-formed
+        alliances lasted forever and raids were structurally impossible."""
+        from .relations import FRIENDLY_THRESHOLD
+
+        self._expire_cold_alliances()
         self.contested = {}
         friction_pairs: list[tuple[str, str]] = [
             (id_a, id_b)

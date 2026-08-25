@@ -250,6 +250,9 @@ class WorldSession:
                     "army": round(s.army, 1),
                     "happiness": round(s.happiness, 3),
                     "food_stock": round(s.food_stock, 1),
+                    "wood": round(s.resource_inventory.get("wood", 0.0), 1),
+                    "stone": round(s.resource_inventory.get("stone", 0.0), 1),
+                    "metal": round(s.resource_inventory.get("metal", 0.0), 1),
                     "frozen": s.frozen,
                 }
                 for s in living
@@ -407,6 +410,11 @@ def create_app(session: WorldSession) -> FastAPI:
                 if z.is_active(tick)
             ],
             "wars": wars,
+            "highways": [
+                [int(x), int(y)]
+                for project in getattr(sim, "highway_projects", [])
+                for (y, x) in project.path[: project.segments_done]
+            ],
             "settlements": settlements,
         }
 
@@ -464,7 +472,7 @@ def create_app(session: WorldSession) -> FastAPI:
 
     @app.get("/api/timeline")
     def api_timeline(limit: int = 50, category: str | None = None):
-        from .timeline import build_timeline, category_of, render_timeline
+        from .timeline import build_timeline, category_of
 
         _require_world(session)
         categories = {category} if category else None
@@ -472,8 +480,11 @@ def create_app(session: WorldSession) -> FastAPI:
                                 limit=max(0, min(limit, 1000)))
         return {
             "count": len(events),
-            "rendered": render_timeline(session.sim, events,
-                                        date_stamps=False).splitlines(),
+            "rendered": [
+                f"[t{e.tick}] ({category_of(e.type)}) "
+                f"{e.type}: {e.description}"
+                for e in events
+            ],
         }
 
     @app.post("/api/step")
